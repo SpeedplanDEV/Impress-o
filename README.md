@@ -49,9 +49,39 @@ Abra <http://localhost:3070>. Na primeira vez, defina seu nome e senha. Para des
 Testes: `npm test` (modelo de custo, CSV, validação de modelo, PNG/PDF e API). Verificação de tipos:
 `npm run typecheck`. Teste ponta a ponta em navegador real: veja `e2e/README.md`.
 
-Variáveis opcionais: `PORT` (padrão 3070), `HOST` (padrão 127.0.0.1), `IMPRESSO_DATA_DIR`
-(pasta de dados; padrão `./data`), `IMPRESSO_DB_PATH` (arquivo do banco) e `IMPRESSO_ALLOWED_HOSTS`
-(hosts extras aceitos, separados por vírgula, se for acessar de outro nome/IP além de localhost).
+Variáveis opcionais (arquivo `.env`, veja `.env.example`): `PORT` (padrão 3070), `HOST` (padrão
+127.0.0.1), `DATABASE_URL` (Postgres na nuvem; vazio = SQLite local), `IMPRESSO_DATA_DIR` (pasta de
+dados; padrão `./data`), `IMPRESSO_DB_PATH` (arquivo do SQLite), `IMPRESSO_ALLOWED_HOSTS` (hosts
+extras aceitos, separados por vírgula) e `IMPRESSO_SECURE_COOKIES=1` (atrás de HTTPS).
+
+## Banco de dados: local ou gratuito na nuvem
+
+Por padrão o sistema grava tudo em um arquivo SQLite em `data/` (sem instalar nada). Para usar um
+**banco Postgres gratuito na nuvem**, que permite acessar os mesmos cadastros de mais de um computador
+e ter backup automático, defina a variável `DATABASE_URL` (no arquivo `.env`, copiado de
+`.env.example`, ou no ambiente). Fotos, logos, modelos, pessoas e histórico passam a ficar no banco;
+só a saída de impressão fica na máquina.
+
+**Supabase (grátis: 500 MB, sem cartão):**
+
+1. Crie uma conta em <https://supabase.com> e um projeto (região *South America (São Paulo)*).
+2. Em **Project Settings → Database → Connection string**, escolha **URI** no modo **Session pooler**
+   (funciona em redes só IPv4) e copie o texto, trocando `[YOUR-PASSWORD]` pela senha do projeto.
+3. No `.env`: `DATABASE_URL=postgresql://postgres.xxxx:SENHA@aws-0-sa-east-1.pooler.supabase.com:5432/postgres`
+4. Inicie o sistema. As tabelas são criadas sozinhas na primeira execução.
+
+**Neon (grátis: 0,5 GB):** crie o projeto em <https://neon.tech>, copie a *connection string* do painel
+(já vem com `?sslmode=require`) e use em `DATABASE_URL`.
+
+Observações:
+
+- A impressora continua sendo acessada pelo computador onde o `npm start` roda (é ele que fala com o
+  driver Entrust). O banco na nuvem só guarda os dados; vários computadores podem apontar para o mesmo
+  banco e imprimir cada um na sua Sigma DS.
+- Ao trocar de SQLite para Postgres, os arquivos que estavam em `data/uploads` são importados para o
+  banco automaticamente na primeira inicialização (os cadastros em si não são migrados: o banco novo
+  começa vazio).
+- Os testes automatizados rodam a mesma suíte de API nos dois bancos (SQLite e Postgres em memória).
 
 ## Fluxo recomendado
 
@@ -131,4 +161,6 @@ data/     Banco, fotos/logos e saída de impressão (criada em tempo de execuç�
 
 ## Backup
 
-Pare o sistema e copie a pasta `data/` inteira (banco `impress-o.sqlite` + `uploads/`).
+- **SQLite local:** pare o sistema e copie a pasta `data/` inteira (banco `impress-o.sqlite`).
+- **Postgres na nuvem:** o Supabase/Neon fazem backup automático; para uma cópia própria use o
+  `pg_dump` com a mesma `DATABASE_URL`.

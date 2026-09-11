@@ -18,7 +18,11 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
 - **O servidor é local e de usuário único**: senha com scrypt, sessão em cookie HttpOnly (SameSite=Lax),
   bloqueio progressivo após tentativas erradas, validação de `Host`/`Origin` (contra DNS rebinding e
   requisições de outros sites) e arquivos enviados servidos com CSP `sandbox` (SVG nunca executa script).
-- **Persistência**: SQLite embutido no Node (`node:sqlite`, sem compilação) + arquivos em `data/`.
+- **Persistência**: camada única (`server/src/lib/db.ts`) com dois bancos: SQLite embutido no Node
+  (`node:sqlite`, padrão) ou **Postgres** via `DATABASE_URL` (Supabase/Neon gratuitos, driver `pg`).
+  O SQL é comum aos dois (placeholders `?` convertidos em `$n`, `RETURNING id`, datas em texto UTC);
+  o DDL usa marcadores de dialeto. Fotos e logos ficam como BLOB/BYTEA na tabela `assets`.
+  Os testes de API rodam nos dois dialetos (SQLite e PGlite, Postgres em WASM).
 
 ## Módulos
 
@@ -27,7 +31,7 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
 | `shared/card.ts` | Constantes CR80 (85,6 × 53,98 mm; 1013 × 638 px a 300 dpi), foto 3x4 (30 × 40 mm), conversões mm↔px |
 | `shared/template.ts` | Formato `.impresso.json`, papéis dos elementos (`photo`, `logo`, `name`, `field`, `qr`, `static`), campos dinâmicos, validação |
 | `shared/cost.ts` | Modelo de custo puro + presets de fitas Sigma DS + testes |
-| `server/src/lib/db.ts` | Abertura do SQLite, migrações, helpers de configuração |
+| `server/src/lib/db.ts` | Interface `Db` assíncrona, adaptadores SQLite/Postgres/PGlite, migrações, helpers de configuração |
 | `server/src/lib/auth.ts` | Usuário único, hash de senha, sessões |
 | `server/src/lib/assets.ts` | Upload de imagens (data URL → arquivo), dimensões PNG/JPEG/WebP/GIF |
 | `server/src/routes/*` | `companies`, `departments`, `persons` (+ importação CSV), `templates` (+ import/export/duplicar/resolver), `cards` (dados de preenchimento), `printers`, `print` (jobs, PDF, cartão de teste), `cost`, `settings`, `auth` |

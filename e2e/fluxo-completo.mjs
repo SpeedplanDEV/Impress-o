@@ -33,7 +33,20 @@ const server = spawn('node', ['--disable-warning=ExperimentalWarning', 'dist/ser
 let serverLog = ''
 server.stdout.on('data', (d) => { serverLog += d })
 server.stderr.on('data', (d) => { serverLog += d })
-await new Promise((r) => setTimeout(r, 1500))
+// Espera o servidor responder (o banco em memória Postgres demora alguns segundos para iniciar)
+async function esperarServidor(url, tentativas = 60) {
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const r = await fetch(url)
+      if (r.ok) return
+    } catch {
+      /* ainda subindo */
+    }
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  throw new Error(`Servidor não respondeu em ${url}`)
+}
+await esperarServidor(`http://127.0.0.1:${PORT}/api/auth/status`)
 
 const results = []
 const ok = (name, cond, extra = '') => { results.push({ name, ok: !!cond, extra }); console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' — ' + extra : ''}`) }

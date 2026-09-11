@@ -1,6 +1,10 @@
 /**
  * Arquivos binários (fotos 3x4, logos, fundos de modelo).
- * Recebidos como data URL (base64) e gravados em data/uploads; metadados no SQLite.
+ *
+ * O conteúdo fica NO BANCO (coluna BLOB/BYTEA), e não em disco: assim o mesmo
+ * banco na nuvem (Supabase/Neon) serve várias máquinas e o backup é um só.
+ * Arquivos gravados em data/uploads por versões anteriores são importados
+ * para o banco na inicialização (ver importarUploadsAntigos).
  */
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -83,57 +87,84 @@ export function imageSize(mime: string, buf: Buffer): { width: number; height: n
   return null
 }
 
-export function assetPath(asset: Pick<AssetRow, 'file_name'>): string {
-  return path.join(config.uploadsDir, asset.file_name)
-}
+const ASSET_COLUMNS = 'id, kind, mime, file_name, width, height, size_bytes, sha256, created_at'
 
-export function saveAsset(kind: AssetKind, dataUrl: string): AssetRow {
+export async function saveAsset(kind: AssetKind, dataUrl: string): Promise<AssetRow> {
   const { mime, buffer } = parseDataUrl(dataUrl)
+  return saveAssetBuffer(kind, mime, buffer)
+}
+
+export async function saveAssetBuffer(kind: AssetKind, mime: string, buffer: Buffer): Promise<AssetRow> {
+  const db = await getDb()
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex')
-  const db = getDb()
-  const existing = db.prepare('SELECT * FROM assets WHERE sha256 = ? AND kind = ?').get(sha256, kind) as unknown as AssetRow | undefined
-  if (existing && fs.existsSync(assetPath(existing))) return existing
-
-  fs.mkdirSync(config.uploadsDir, { recursive: true })
-  const fileName = `${kind}-${sha256.slice(0, 16)}-${crypto.randomBytes(4).toString('hex')}.${MIME_EXT[mime]}`
-  fs.writeFileSync(path.join(config.uploadsDir, fileName), buffer)
+  const existing = await db.get<AssetRow>(`SELECT ${ASSET_COLUMNS} FROM assets WHERE sha256 = ? AND kind = ? AND data IS NOT NULL`, [sha256, kind])
+  if (existing) return existing
+  const fileName = `${kind}-${sha256.slice(0, 16)}-${crypto.randomBytes(4).toString('hex')}.${MIME_EXT[mime] ?? 'bin'}`
   const size = imageSize(mime, buffer)
-  const info = db
-    .prepare('INSERT INTO assets (kind, mime, file_name, width, height, size_bytes, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(kind, mime, fileName, size?.width ?? null, size?.height ?? null, buffer.length, sha256)
-  return getAsset(Number(info.lastInsertRowid))!
+  const row = await db.get<{ id: number }>(
+    'INSERT INTO assets (kind, mime, file_name, width, height, size_bytes, sha256, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+    [kind, mime, fileName, size?.width ?? null, size?.height ?? null, buffer.length, sha256, buffer],
+  )
+  return (await getAsset(row!.id))!
 }
 
-export function getAsset(id: number): AssetRow | null {
-  const row = getDb().prepare('SELECT * FROM assets WHERE id = ?').get(id) as unknown as AssetRow | undefined
-  return row ?? null
+export async function getAsset(id: number): Promise<AssetRow | null> {
+  const db = await getDb()
+  return (await db.get<AssetRow>(`SELECT ${ASSET_COLUMNS} FROM assets WHERE id = ?`, [id])) ?? null
 }
 
-export function deleteAsset(id: number): void {
-  const asset = getAsset(id)
+/** Conteúdo binário do arquivo (do banco; ou do disco, para registros antigos). */
+export async function getAssetData(id: number): Promise<{ asset: AssetRow; data: Buffer } | null> {
+  const db = await getDb()
+  const row = await db.get<AssetRow & { data: Buffer | null }>(`SELECT ${ASSET_COLUMNS}, data FROM assets WHERE id = ?`, [id])
+  if (!row) return null
+  const { data, ...asset } = row
+  if (data && data.length > 0) return { asset, data: Buffer.isBuffer(data) ? data : Buffer.from(data) }
+  const legacy = path.join(config.uploadsDir, asset.file_name)
+  if (fs.existsSync(legacy)) return { asset, data: fs.readFileSync(legacy) }
+  return null
+}
+
+export async function deleteAsset(id: number): Promise<void> {
+  const db = await getDb()
+  const asset = await getAsset(id)
   if (!asset) return
-  const db = getDb()
-  db.prepare('UPDATE companies SET logo_asset_id = NULL WHERE logo_asset_id = ?').run(id)
-  db.prepare('UPDATE persons SET photo_asset_id = NULL WHERE photo_asset_id = ?').run(id)
-  db.prepare('DELETE FROM assets WHERE id = ?').run(id)
+  await db.run('UPDATE companies SET logo_asset_id = NULL WHERE logo_asset_id = ?', [id])
+  await db.run('UPDATE persons SET photo_asset_id = NULL WHERE photo_asset_id = ?', [id])
+  await db.run('DELETE FROM assets WHERE id = ?', [id])
   try {
-    fs.unlinkSync(assetPath(asset))
+    fs.unlinkSync(path.join(config.uploadsDir, asset.file_name))
   } catch {
-    /* já removido */
+    /* não existia em disco */
   }
 }
 
 /** Data URL do arquivo (usado pelo renderizador do cartão). */
-export function assetToDataUrl(id: number | null | undefined): string | null {
+export async function assetToDataUrl(id: number | null | undefined): Promise<string | null> {
   if (!id) return null
-  const asset = getAsset(id)
-  if (!asset) return null
-  const p = assetPath(asset)
-  if (!fs.existsSync(p)) return null
-  return `data:${asset.mime};base64,${fs.readFileSync(p).toString('base64')}`
+  const found = await getAssetData(id)
+  if (!found) return null
+  return `data:${found.asset.mime};base64,${found.data.toString('base64')}`
 }
 
 /** URL relativa servida pela API. */
 export function assetUrl(id: number | null | undefined): string | null {
   return id ? `/api/assets/${id}` : null
+}
+
+/**
+ * Importa para o banco os arquivos que versões anteriores gravaram em
+ * data/uploads (registros sem `data`). Roda uma vez na inicialização.
+ */
+export async function importarUploadsAntigos(): Promise<number> {
+  const db = await getDb()
+  const pendentes = await db.all<{ id: number; file_name: string }>('SELECT id, file_name FROM assets WHERE data IS NULL')
+  let importados = 0
+  for (const a of pendentes) {
+    const p = path.join(config.uploadsDir, a.file_name)
+    if (!fs.existsSync(p)) continue
+    await db.run('UPDATE assets SET data = ? WHERE id = ?', [fs.readFileSync(p), a.id])
+    importados++
+  }
+  return importados
 }

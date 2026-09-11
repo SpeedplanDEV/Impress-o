@@ -13,18 +13,18 @@ const setupSchema = z.object({
 })
 
 /** Estado público: sistema configurado? sessão ativa? */
-authRouter.get('/status', (req, res) => {
-  const user = getUser()
+authRouter.get('/status', async (req, res) => {
+  const user = await getUser()
   res.json({
     setupDone: user !== null,
-    authenticated: isValidSession(sessionTokenFromRequest(req)),
+    authenticated: await isValidSession(sessionTokenFromRequest(req)),
     userName: user?.name ?? null,
   })
 })
 
 /** Primeira execução: cria o único usuário e já inicia a sessão. */
-authRouter.post('/setup', (req, res) => {
-  if (isSetupDone()) {
+authRouter.post('/setup', async (req, res) => {
+  if (await isSetupDone()) {
     res.status(409).json({ error: 'O sistema já foi configurado. Faça login.' })
     return
   }
@@ -33,8 +33,8 @@ authRouter.post('/setup', (req, res) => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' })
     return
   }
-  const user = createUser(parsed.data.name, parsed.data.password)
-  const s = createSession()
+  const user = await createUser(parsed.data.name, parsed.data.password)
+  const s = await createSession()
   setSessionCookie(res, s.token, s.expiresAt)
   res.status(201).json({ ok: true, userName: user.name })
 })
@@ -44,7 +44,7 @@ let failedLogins = 0
 let lockedUntil = 0
 
 authRouter.post('/login', async (req, res) => {
-  const user = getUser()
+  const user = await getUser()
   if (!user) {
     res.status(409).json({ error: 'O sistema ainda não foi configurado.' })
     return
@@ -64,13 +64,13 @@ authRouter.post('/login', async (req, res) => {
   }
   failedLogins = 0
   lockedUntil = 0
-  const s = createSession()
+  const s = await createSession()
   setSessionCookie(res, s.token, s.expiresAt)
   res.json({ ok: true, userName: user.name })
 })
 
-authRouter.post('/logout', (req, res) => {
-  destroySession(sessionTokenFromRequest(req))
+authRouter.post('/logout', async (req, res) => {
+  await destroySession(sessionTokenFromRequest(req))
   clearSessionCookie(res)
   res.json({ ok: true })
 })
@@ -82,8 +82,8 @@ const updateSchema = z.object({
 })
 
 /** Atualiza nome e/ou senha do usuário (exige sessão). */
-authRouter.put('/account', (req, res) => {
-  if (!isValidSession(sessionTokenFromRequest(req))) {
+authRouter.put('/account', async (req, res) => {
+  if (!(await isValidSession(sessionTokenFromRequest(req)))) {
     res.status(401).json({ error: 'Não autenticado.' })
     return
   }
@@ -92,16 +92,16 @@ authRouter.put('/account', (req, res) => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Dados inválidos.' })
     return
   }
-  const user = getUser()!
+  const user = (await getUser())!
   if (parsed.data.newPassword !== undefined) {
     if (!verifyPassword(parsed.data.currentPassword ?? '', user.password_hash)) {
       res.status(401).json({ error: 'Senha atual incorreta.' })
       return
     }
   }
-  const updated = updateUser({ name: parsed.data.name, password: parsed.data.newPassword })
+  const updated = await updateUser({ name: parsed.data.name, password: parsed.data.newPassword })
   if (parsed.data.newPassword !== undefined) {
-    const s = createSession()
+    const s = await createSession()
     setSessionCookie(res, s.token, s.expiresAt)
   }
   res.json({ ok: true, userName: updated.name })

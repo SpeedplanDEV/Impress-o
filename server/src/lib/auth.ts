@@ -39,57 +39,60 @@ export interface UserAccount {
   password_hash: string
 }
 
-export function getUser(): UserAccount | null {
-  const row = getDb().prepare('SELECT id, name, password_hash FROM user_account WHERE id = 1').get() as unknown as UserAccount | undefined
-  return row ?? null
+export async function getUser(): Promise<UserAccount | null> {
+  const db = await getDb()
+  return (await db.get<UserAccount>('SELECT id, name, password_hash FROM user_account WHERE id = 1')) ?? null
 }
 
-export function isSetupDone(): boolean {
-  return getUser() !== null
+export async function isSetupDone(): Promise<boolean> {
+  return (await getUser()) !== null
 }
 
-export function createUser(name: string, password: string): UserAccount {
-  const db = getDb()
-  if (getUser()) throw new Error('O sistema já possui um usuário cadastrado.')
-  db.prepare('INSERT INTO user_account (id, name, password_hash) VALUES (1, ?, ?)').run(name, hashPassword(password))
-  return getUser()!
+export async function createUser(name: string, password: string): Promise<UserAccount> {
+  const db = await getDb()
+  if (await getUser()) throw new Error('O sistema já possui um usuário cadastrado.')
+  await db.run('INSERT INTO user_account (id, name, password_hash) VALUES (1, ?, ?)', [name, hashPassword(password)])
+  return (await getUser())!
 }
 
-export function updateUser(opts: { name?: string; password?: string }): UserAccount {
-  const db = getDb()
-  const user = getUser()
+export async function updateUser(opts: { name?: string; password?: string }): Promise<UserAccount> {
+  const db = await getDb()
+  const user = await getUser()
   if (!user) throw new Error('Usuário não configurado.')
-  if (opts.name !== undefined) db.prepare("UPDATE user_account SET name = ?, updated_at = datetime('now') WHERE id = 1").run(opts.name)
+  if (opts.name !== undefined) await db.run('UPDATE user_account SET name = ?, updated_at = ? WHERE id = 1', [opts.name, nowIso()])
   if (opts.password !== undefined) {
-    db.prepare("UPDATE user_account SET password_hash = ?, updated_at = datetime('now') WHERE id = 1").run(hashPassword(opts.password))
+    await db.run('UPDATE user_account SET password_hash = ?, updated_at = ? WHERE id = 1', [hashPassword(opts.password), nowIso()])
     // Trocar a senha invalida as outras sessões
-    db.prepare('DELETE FROM sessions').run()
+    await db.run('DELETE FROM sessions')
   }
-  return getUser()!
+  return (await getUser())!
 }
 
 /* -------------------------- Sessões ------------------------------- */
 
-export function createSession(): { token: string; expiresAt: string } {
+export async function createSession(): Promise<{ token: string; expiresAt: string }> {
+  const db = await getDb()
   const token = crypto.randomBytes(32).toString('base64url')
   const expires = new Date(Date.now() + config.sessionTtlHours * 3600 * 1000)
   const expiresAt = expires.toISOString().replace('T', ' ').slice(0, 19)
-  getDb().prepare('INSERT INTO sessions (token, expires_at) VALUES (?, ?)').run(token, expiresAt)
+  await db.run('INSERT INTO sessions (token, expires_at) VALUES (?, ?)', [token, expiresAt])
   // Limpeza oportunista de sessões expiradas
-  getDb().prepare('DELETE FROM sessions WHERE expires_at < ?').run(nowIso())
+  await db.run('DELETE FROM sessions WHERE expires_at < ?', [nowIso()])
   return { token, expiresAt }
 }
 
-export function isValidSession(token: string | undefined): boolean {
+export async function isValidSession(token: string | undefined): Promise<boolean> {
   if (!token) return false
-  const row = getDb().prepare('SELECT expires_at FROM sessions WHERE token = ?').get(token) as unknown as { expires_at: string } | undefined
+  const db = await getDb()
+  const row = await db.get<{ expires_at: string }>('SELECT expires_at FROM sessions WHERE token = ?', [token])
   if (!row) return false
   return row.expires_at >= nowIso()
 }
 
-export function destroySession(token: string | undefined): void {
+export async function destroySession(token: string | undefined): Promise<void> {
   if (!token) return
-  getDb().prepare('DELETE FROM sessions WHERE token = ?').run(token)
+  const db = await getDb()
+  await db.run('DELETE FROM sessions WHERE token = ?', [token])
 }
 
 export function parseCookies(header: string | undefined): Record<string, string> {
@@ -120,9 +123,10 @@ export function sessionTokenFromRequest(req: Request): string | undefined {
 
 export function setSessionCookie(res: Response, token: string, expiresAt: string): void {
   const expires = new Date(expiresAt.replace(' ', 'T') + 'Z')
+  const secure = config.secureCookies ? '; Secure' : ''
   res.setHeader(
     'Set-Cookie',
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expires.toUTCString()}`,
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secure}; Expires=${expires.toUTCString()}`,
   )
 }
 
@@ -132,9 +136,10 @@ export function clearSessionCookie(res: Response): void {
 
 /** Middleware: exige sessão válida para tudo em /api exceto as rotas públicas. */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (isValidSession(sessionTokenFromRequest(req))) {
-    next()
-    return
-  }
-  res.status(401).json({ error: 'Não autenticado.' })
+  isValidSession(sessionTokenFromRequest(req))
+    .then((ok) => {
+      if (ok) next()
+      else res.status(401).json({ error: 'Não autenticado.' })
+    })
+    .catch(next)
 }

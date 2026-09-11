@@ -2,7 +2,7 @@
   "name": "impress-o",
   "version": "0.1.0",
   "private": true,
-  "description": "Sistema de impress\u00e3o de cart\u00f5es/crach\u00e1s personalizados para impressoras Entrust Sigma DS",
+  "description": "Sistema de impressão de cartões/crachás personalizados para impressoras Entrust Sigma DS",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
@@ -19,9 +19,11 @@
     "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p server/tsconfig.test.json --noEmit && tsc -p client/tsconfig.json --noEmit"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "fabric": "^7.4.0",
     "pdf-lib": "^1.17.1",
+    "pg": "^8.23.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -30,8 +32,10 @@
     "zod": "^4.6.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/express": "^5.0.6",
     "@types/node": "^22.20.2",
+    "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

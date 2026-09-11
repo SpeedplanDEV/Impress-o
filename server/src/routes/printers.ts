@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { getDb } from '../lib/db.js'
+import { getDb, nowIso } from '../lib/db.js'
 import { HttpError, parseId, validate } from '../lib/http.js'
 import { getAdapter, listSystemPrinters, checkNetwork, type PrinterConfig, type PrinterOptions } from '../printer/index.js'
 
@@ -35,20 +35,22 @@ export function rowToConfig(r: PrinterRow): PrinterConfig {
     systemName: r.system_name,
     host: r.host,
     model: r.model,
-    dpi: r.dpi,
-    duplex: r.duplex === 1,
-    isDefault: r.is_default === 1,
+    dpi: Number(r.dpi),
+    duplex: Number(r.duplex) === 1,
+    isDefault: Number(r.is_default) === 1,
     options,
   }
 }
 
-export function getPrinter(id: number): PrinterConfig | null {
-  const r = getDb().prepare('SELECT * FROM printers WHERE id = ?').get(id) as unknown as PrinterRow | undefined
+export async function getPrinter(id: number): Promise<PrinterConfig | null> {
+  const db = await getDb()
+  const r = await db.get<PrinterRow>('SELECT * FROM printers WHERE id = ?', [id])
   return r ? rowToConfig(r) : null
 }
 
-export function getDefaultPrinter(): PrinterConfig | null {
-  const r = getDb().prepare('SELECT * FROM printers ORDER BY is_default DESC, id ASC LIMIT 1').get() as unknown as PrinterRow | undefined
+export async function getDefaultPrinter(): Promise<PrinterConfig | null> {
+  const db = await getDb()
+  const r = await db.get<PrinterRow>('SELECT * FROM printers ORDER BY is_default DESC, id ASC LIMIT 1')
   return r ? rowToConfig(r) : null
 }
 
@@ -73,8 +75,9 @@ const printerSchema = z.object({
   options: optionsSchema.optional(),
 })
 
-printersRouter.get('/', (_req, res) => {
-  const rows = getDb().prepare('SELECT * FROM printers ORDER BY is_default DESC, name COLLATE NOCASE').all() as unknown as PrinterRow[]
+printersRouter.get('/', async (_req, res) => {
+  const db = await getDb()
+  const rows = await db.all<PrinterRow>('SELECT * FROM printers ORDER BY is_default DESC, lower(name)')
   res.json(rows.map(rowToConfig))
 })
 
@@ -84,75 +87,78 @@ printersRouter.get('/system', async (_req, res) => {
   res.json({ platform: process.platform, printers })
 })
 
-printersRouter.post('/', (req, res) => {
+printersRouter.post('/', async (req, res) => {
   const body = validate(printerSchema, req.body)
   if (body.adapter === 'system' && !body.systemName && !body.host) {
     throw new HttpError(400, 'Informe o nome da fila no sistema (ou o endereço de rede) da impressora.')
   }
-  const db = getDb()
-  const count = (db.prepare('SELECT COUNT(*) AS c FROM printers').get() as unknown as { c: number }).c
-  const isDefault = body.isDefault || count === 0
-  if (isDefault) db.prepare('UPDATE printers SET is_default = 0').run()
-  const info = db
-    .prepare('INSERT INTO printers (name, adapter, system_name, host, model, dpi, duplex, is_default, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(body.name, body.adapter, body.systemName ?? null, body.host ?? null, body.model ?? 'Entrust Sigma DS', body.dpi ?? 300, body.duplex ? 1 : 0, isDefault ? 1 : 0, JSON.stringify(body.options ?? {}))
-  res.status(201).json(getPrinter(Number(info.lastInsertRowid)))
+  const db = await getDb()
+  const id = await db.transaction(async (tx) => {
+    const count = Number((await tx.get<{ c: number }>('SELECT COUNT(*) AS c FROM printers'))!.c)
+    const isDefault = body.isDefault || count === 0
+    if (isDefault) await tx.run('UPDATE printers SET is_default = 0')
+    const row = await tx.get<{ id: number }>(
+      'INSERT INTO printers (name, adapter, system_name, host, model, dpi, duplex, is_default, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      [body.name, body.adapter, body.systemName ?? null, body.host ?? null, body.model ?? 'Entrust Sigma DS', body.dpi ?? 300, body.duplex ? 1 : 0, isDefault ? 1 : 0, JSON.stringify(body.options ?? {})],
+    )
+    return row!.id
+  })
+  res.status(201).json(await getPrinter(id))
 })
 
-printersRouter.put('/:id', (req, res) => {
+printersRouter.put('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  const existing = getPrinter(id)
+  const existing = await getPrinter(id)
   if (!existing) throw new HttpError(404, 'Impressora não encontrada.')
   const body = validate(printerSchema.partial(), req.body)
-  const db = getDb()
   const pick = <T>(v: T | undefined, f: T): T => (v === undefined ? f : v)
   const nextAdapter = body.adapter ?? existing.adapter
   if (nextAdapter === 'system' && !pick(body.systemName, existing.systemName) && !pick(body.host, existing.host)) {
     throw new HttpError(400, 'Informe o nome da fila no sistema (ou o endereço de rede) da impressora.')
   }
-  if (body.isDefault) db.prepare('UPDATE printers SET is_default = 0').run()
-  db.prepare(
-    `UPDATE printers SET name = ?, adapter = ?, system_name = ?, host = ?, model = ?, dpi = ?, duplex = ?, is_default = ?, options_json = ?, updated_at = datetime('now') WHERE id = ?`,
-  ).run(
-    body.name ?? existing.name,
-    body.adapter ?? existing.adapter,
-    pick(body.systemName, existing.systemName),
-    pick(body.host, existing.host),
-    body.model ?? existing.model,
-    body.dpi ?? existing.dpi,
-    (body.duplex ?? existing.duplex) ? 1 : 0,
-    body.isDefault ? 1 : existing.isDefault ? 1 : 0,
-    JSON.stringify({ ...existing.options, ...(body.options ?? {}) }),
-    id,
-  )
-  res.json(getPrinter(id))
+  const db = await getDb()
+  await db.transaction(async (tx) => {
+    if (body.isDefault) await tx.run('UPDATE printers SET is_default = 0')
+    await tx.run(
+      'UPDATE printers SET name = ?, adapter = ?, system_name = ?, host = ?, model = ?, dpi = ?, duplex = ?, is_default = ?, options_json = ?, updated_at = ? WHERE id = ?',
+      [
+        body.name ?? existing.name,
+        nextAdapter,
+        pick(body.systemName, existing.systemName),
+        pick(body.host, existing.host),
+        body.model ?? existing.model,
+        body.dpi ?? existing.dpi,
+        (body.duplex ?? existing.duplex) ? 1 : 0,
+        body.isDefault ? 1 : existing.isDefault ? 1 : 0,
+        JSON.stringify({ ...existing.options, ...(body.options ?? {}) }),
+        nowIso(),
+        id,
+      ],
+    )
+  })
+  res.json(await getPrinter(id))
 })
 
-printersRouter.delete('/:id', (req, res) => {
+printersRouter.delete('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  const existing = getPrinter(id)
+  const existing = await getPrinter(id)
   if (!existing) throw new HttpError(404, 'Impressora não encontrada.')
-  const db = getDb()
-  db.exec('BEGIN')
-  try {
-    db.prepare('DELETE FROM printers WHERE id = ?').run(id)
-    const defaults = (db.prepare('SELECT COUNT(*) AS c FROM printers WHERE is_default = 1').get() as unknown as { c: number }).c
+  const db = await getDb()
+  await db.transaction(async (tx) => {
+    await tx.run('DELETE FROM printers WHERE id = ?', [id])
+    const defaults = Number((await tx.get<{ c: number }>('SELECT COUNT(*) AS c FROM printers WHERE is_default = 1'))!.c)
     if (defaults !== 1) {
-      const remaining = db.prepare('SELECT id FROM printers ORDER BY is_default DESC, id ASC LIMIT 1').get() as unknown as { id: number } | undefined
-      db.prepare('UPDATE printers SET is_default = 0').run()
-      if (remaining) db.prepare('UPDATE printers SET is_default = 1 WHERE id = ?').run(remaining.id)
+      const remaining = await tx.get<{ id: number }>('SELECT id FROM printers ORDER BY is_default DESC, id ASC LIMIT 1')
+      await tx.run('UPDATE printers SET is_default = 0')
+      if (remaining) await tx.run('UPDATE printers SET is_default = 1 WHERE id = ?', [remaining.id])
     }
-    db.exec('COMMIT')
-  } catch (err) {
-    db.exec('ROLLBACK')
-    throw err
-  }
+  })
   res.json({ ok: true })
 })
 
 /** Testa conectividade / estado da impressora. */
 printersRouter.post('/:id/status', async (req, res) => {
-  const p = getPrinter(parseId(req.params.id))
+  const p = await getPrinter(parseId(req.params.id))
   if (!p) throw new HttpError(404, 'Impressora não encontrada.')
   res.json(await getAdapter(p.adapter).status(p))
 })

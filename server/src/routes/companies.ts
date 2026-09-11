@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { getDb } from '../lib/db.js'
+import { getDb, nowIso } from '../lib/db.js'
 import { HttpError, parseId, validate } from '../lib/http.js'
 import { assetUrl, saveAsset } from '../lib/assets.js'
 
@@ -43,7 +43,7 @@ function serializeCompany(c: CompanyRow, counts?: { departments: number; persons
   }
 }
 
-function serializeDepartment(d: DepartmentRow & { persons_count?: number; company_name?: string }) {
+function serializeDepartment(d: DepartmentRow & { persons_count?: number; company_name?: string | null }) {
   return {
     id: d.id,
     companyId: d.company_id,
@@ -51,17 +51,19 @@ function serializeDepartment(d: DepartmentRow & { persons_count?: number; compan
     name: d.name,
     color: d.color,
     defaultTemplateId: d.default_template_id,
-    personsCount: d.persons_count ?? 0,
+    personsCount: Number(d.persons_count ?? 0),
     createdAt: d.created_at,
     updatedAt: d.updated_at,
   }
 }
 
-export function getCompany(id: number): CompanyRow | null {
-  return (getDb().prepare('SELECT * FROM companies WHERE id = ?').get(id) as unknown as CompanyRow | undefined) ?? null
+export async function getCompany(id: number): Promise<CompanyRow | null> {
+  const db = await getDb()
+  return (await db.get<CompanyRow>('SELECT * FROM companies WHERE id = ?', [id])) ?? null
 }
-export function getDepartment(id: number): DepartmentRow | null {
-  return (getDb().prepare('SELECT * FROM departments WHERE id = ?').get(id) as unknown as DepartmentRow | undefined) ?? null
+export async function getDepartment(id: number): Promise<DepartmentRow | null> {
+  const db = await getDb()
+  return (await db.get<DepartmentRow>('SELECT * FROM departments WHERE id = ?', [id])) ?? null
 }
 
 const companySchema = z.object({
@@ -73,64 +75,68 @@ const companySchema = z.object({
   logoDataUrl: z.string().nullable().optional(),
 })
 
-companiesRouter.get('/', (_req, res) => {
-  const rows = getDb()
-    .prepare(
-      `SELECT c.*,
-        (SELECT COUNT(*) FROM departments d WHERE d.company_id = c.id) AS departments,
-        (SELECT COUNT(*) FROM persons p WHERE p.company_id = c.id) AS persons
-       FROM companies c ORDER BY c.name COLLATE NOCASE`,
-    )
-    .all() as unknown as (CompanyRow & { departments: number; persons: number })[]
-  res.json(rows.map((r) => serializeCompany(r, { departments: r.departments, persons: r.persons })))
+companiesRouter.get('/', async (_req, res) => {
+  const db = await getDb()
+  const rows = await db.all<CompanyRow & { departments: number; persons: number }>(
+    `SELECT c.*,
+      (SELECT COUNT(*) FROM departments d WHERE d.company_id = c.id) AS departments,
+      (SELECT COUNT(*) FROM persons p WHERE p.company_id = c.id) AS persons
+     FROM companies c ORDER BY lower(c.name)`,
+  )
+  res.json(rows.map((r) => serializeCompany(r, { departments: Number(r.departments), persons: Number(r.persons) })))
 })
 
-companiesRouter.get('/:id', (req, res) => {
-  const c = getCompany(parseId(req.params.id))
+companiesRouter.get('/:id', async (req, res) => {
+  const c = await getCompany(parseId(req.params.id))
   if (!c) throw new HttpError(404, 'Empresa não encontrada.')
-  const departments = getDb()
-    .prepare('SELECT d.*, (SELECT COUNT(*) FROM persons p WHERE p.department_id = d.id) AS persons_count FROM departments d WHERE d.company_id = ? ORDER BY d.name COLLATE NOCASE')
-    .all(c.id) as unknown as (DepartmentRow & { persons_count: number })[]
+  const db = await getDb()
+  const departments = await db.all<DepartmentRow & { persons_count: number }>(
+    'SELECT d.*, (SELECT COUNT(*) FROM persons p WHERE p.department_id = d.id) AS persons_count FROM departments d WHERE d.company_id = ? ORDER BY lower(d.name)',
+    [c.id],
+  )
   res.json({ ...serializeCompany(c), departments: departments.map(serializeDepartment) })
 })
 
-companiesRouter.post('/', (req, res) => {
+companiesRouter.post('/', async (req, res) => {
   const body = validate(companySchema, req.body)
-  const db = getDb()
-  const logoId = body.logoDataUrl ? saveAsset('logo', body.logoDataUrl).id : null
-  const info = db
-    .prepare('INSERT INTO companies (name, cnpj, notes, default_template_id, logo_asset_id) VALUES (?, ?, ?, ?, ?)')
-    .run(body.name, body.cnpj ?? null, body.notes ?? null, body.defaultTemplateId ?? null, logoId)
-  res.status(201).json(serializeCompany(getCompany(Number(info.lastInsertRowid))!))
+  const db = await getDb()
+  const logoId = body.logoDataUrl ? (await saveAsset('logo', body.logoDataUrl)).id : null
+  const row = await db.get<{ id: number }>(
+    'INSERT INTO companies (name, cnpj, notes, default_template_id, logo_asset_id) VALUES (?, ?, ?, ?, ?) RETURNING id',
+    [body.name, body.cnpj ?? null, body.notes ?? null, body.defaultTemplateId ?? null, logoId],
+  )
+  res.status(201).json(serializeCompany((await getCompany(row!.id))!))
 })
 
-companiesRouter.put('/:id', (req, res) => {
+companiesRouter.put('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  const existing = getCompany(id)
+  const existing = await getCompany(id)
   if (!existing) throw new HttpError(404, 'Empresa não encontrada.')
   const body = validate(companySchema.partial(), req.body)
   let logoId = existing.logo_asset_id
   if (body.logoDataUrl === null) logoId = null
-  else if (typeof body.logoDataUrl === 'string') logoId = saveAsset('logo', body.logoDataUrl).id
-  getDb()
-    .prepare(
-      `UPDATE companies SET name = ?, cnpj = ?, notes = ?, default_template_id = ?, logo_asset_id = ?, updated_at = datetime('now') WHERE id = ?`,
-    )
-    .run(
+  else if (typeof body.logoDataUrl === 'string') logoId = (await saveAsset('logo', body.logoDataUrl)).id
+  const db = await getDb()
+  await db.run(
+    'UPDATE companies SET name = ?, cnpj = ?, notes = ?, default_template_id = ?, logo_asset_id = ?, updated_at = ? WHERE id = ?',
+    [
       body.name ?? existing.name,
       body.cnpj === undefined ? existing.cnpj : body.cnpj,
       body.notes === undefined ? existing.notes : body.notes,
       body.defaultTemplateId === undefined ? existing.default_template_id : body.defaultTemplateId,
       logoId,
+      nowIso(),
       id,
-    )
-  res.json(serializeCompany(getCompany(id)!))
+    ],
+  )
+  res.json(serializeCompany((await getCompany(id))!))
 })
 
-companiesRouter.delete('/:id', (req, res) => {
+companiesRouter.delete('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  if (!getCompany(id)) throw new HttpError(404, 'Empresa não encontrada.')
-  getDb().prepare('DELETE FROM companies WHERE id = ?').run(id)
+  if (!(await getCompany(id))) throw new HttpError(404, 'Empresa não encontrada.')
+  const db = await getDb()
+  await db.run('DELETE FROM companies WHERE id = ?', [id])
   res.json({ ok: true })
 })
 
@@ -143,68 +149,67 @@ const departmentSchema = z.object({
   defaultTemplateId: z.number().int().positive().nullable().optional(),
 })
 
-departmentsRouter.get('/', (req, res) => {
+departmentsRouter.get('/', async (req, res) => {
   const companyId = req.query.companyId ? Number(req.query.companyId) : null
-  const rows = getDb()
-    .prepare(
-      `SELECT d.*, c.name AS company_name,
-        (SELECT COUNT(*) FROM persons p WHERE p.department_id = d.id) AS persons_count
-       FROM departments d JOIN companies c ON c.id = d.company_id
-       WHERE (? IS NULL OR d.company_id = ?)
-       ORDER BY c.name COLLATE NOCASE, d.name COLLATE NOCASE`,
-    )
-    .all(companyId, companyId) as unknown as (DepartmentRow & { persons_count: number; company_name: string })[]
+  const db = await getDb()
+  const where = companyId ? 'WHERE d.company_id = ?' : ''
+  const rows = await db.all<DepartmentRow & { persons_count: number; company_name: string }>(
+    `SELECT d.*, c.name AS company_name,
+      (SELECT COUNT(*) FROM persons p WHERE p.department_id = d.id) AS persons_count
+     FROM departments d JOIN companies c ON c.id = d.company_id
+     ${where}
+     ORDER BY lower(c.name), lower(d.name)`,
+    companyId ? [companyId] : [],
+  )
   res.json(rows.map(serializeDepartment))
 })
 
-departmentsRouter.post('/', (req, res) => {
+departmentsRouter.post('/', async (req, res) => {
   const body = validate(departmentSchema, req.body)
-  if (!getCompany(body.companyId)) throw new HttpError(404, 'Empresa não encontrada.')
-  const db = getDb()
-  const dup = db.prepare('SELECT id FROM departments WHERE company_id = ? AND name = ? COLLATE NOCASE').get(body.companyId, body.name)
+  if (!(await getCompany(body.companyId))) throw new HttpError(404, 'Empresa não encontrada.')
+  const db = await getDb()
+  const dup = await db.get('SELECT id FROM departments WHERE company_id = ? AND lower(name) = lower(?)', [body.companyId, body.name])
   if (dup) throw new HttpError(409, 'Já existe um departamento com esse nome nesta empresa.')
-  const info = db
-    .prepare('INSERT INTO departments (company_id, name, color, default_template_id) VALUES (?, ?, ?, ?)')
-    .run(body.companyId, body.name, body.color ?? null, body.defaultTemplateId ?? null)
-  res.status(201).json(serializeDepartment(getDepartment(Number(info.lastInsertRowid))!))
+  const row = await db.get<{ id: number }>(
+    'INSERT INTO departments (company_id, name, color, default_template_id) VALUES (?, ?, ?, ?) RETURNING id',
+    [body.companyId, body.name, body.color ?? null, body.defaultTemplateId ?? null],
+  )
+  res.status(201).json(serializeDepartment((await getDepartment(row!.id))!))
 })
 
-departmentsRouter.put('/:id', (req, res) => {
+departmentsRouter.put('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  const existing = getDepartment(id)
+  const existing = await getDepartment(id)
   if (!existing) throw new HttpError(404, 'Departamento não encontrado.')
   const body = validate(departmentSchema.partial(), req.body)
   const companyId = body.companyId ?? existing.company_id
-  if (!getCompany(companyId)) throw new HttpError(404, 'Empresa não encontrada.')
+  if (!(await getCompany(companyId))) throw new HttpError(404, 'Empresa não encontrada.')
   const name = body.name ?? existing.name
-  const dup = getDb().prepare('SELECT id FROM departments WHERE company_id = ? AND name = ? COLLATE NOCASE AND id != ?').get(companyId, name, id)
+  const db = await getDb()
+  const dup = await db.get('SELECT id FROM departments WHERE company_id = ? AND lower(name) = lower(?) AND id != ?', [companyId, name, id])
   if (dup) throw new HttpError(409, 'Já existe um departamento com esse nome nesta empresa.')
-  const db = getDb()
-  db.exec('BEGIN')
-  try {
-    db.prepare(`UPDATE departments SET company_id = ?, name = ?, color = ?, default_template_id = ?, updated_at = datetime('now') WHERE id = ?`).run(
+  await db.transaction(async (tx) => {
+    await tx.run('UPDATE departments SET company_id = ?, name = ?, color = ?, default_template_id = ?, updated_at = ? WHERE id = ?', [
       companyId,
       name,
       body.color === undefined ? existing.color : body.color,
       body.defaultTemplateId === undefined ? existing.default_template_id : body.defaultTemplateId,
+      nowIso(),
       id,
-    )
+    ])
     if (companyId !== existing.company_id) {
       // Pessoas e modelos do departamento acompanham a mudança de empresa
-      db.prepare(`UPDATE persons SET company_id = ?, updated_at = datetime('now') WHERE department_id = ?`).run(companyId, id)
-      db.prepare(`UPDATE templates SET company_id = ?, updated_at = datetime('now') WHERE department_id = ?`).run(companyId, id)
+      await tx.run('UPDATE persons SET company_id = ?, updated_at = ? WHERE department_id = ?', [companyId, nowIso(), id])
+      await tx.run('UPDATE templates SET company_id = ?, updated_at = ? WHERE department_id = ?', [companyId, nowIso(), id])
     }
-    db.exec('COMMIT')
-  } catch (err) {
-    db.exec('ROLLBACK')
-    throw err
-  }
-  res.json(serializeDepartment(getDepartment(id)!))
+  })
+  res.json(serializeDepartment((await getDepartment(id))!))
 })
 
-departmentsRouter.delete('/:id', (req, res) => {
+departmentsRouter.delete('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  if (!getDepartment(id)) throw new HttpError(404, 'Departamento não encontrado.')
-  getDb().prepare('DELETE FROM departments WHERE id = ?').run(id)
+  if (!(await getDepartment(id))) throw new HttpError(404, 'Departamento não encontrado.')
+  const db = await getDb()
+  await db.run('DELETE FROM departments WHERE id = ?', [id])
   res.json({ ok: true })
 })

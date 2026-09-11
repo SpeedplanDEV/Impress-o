@@ -9,9 +9,9 @@ import type { CardData } from '../../../shared/template.js'
 export const cardsRouter = Router()
 
 /** Monta os dados que preenchem os placeholders de um modelo para uma pessoa. */
-export function buildCardData(p: PersonJoined, opts: { inlineImages: boolean }): CardData {
-  const company = p.company_id ? getCompany(p.company_id) : null
-  const department = p.department_id ? getDepartment(p.department_id) : null
+export async function buildCardData(p: PersonJoined, opts: { inlineImages: boolean }): Promise<CardData> {
+  const company = p.company_id ? await getCompany(p.company_id) : null
+  const department = p.department_id ? await getDepartment(p.department_id) : null
   let extra: Record<string, string> = {}
   try {
     extra = JSON.parse(p.extra_json || '{}')
@@ -41,21 +41,22 @@ export function buildCardData(p: PersonJoined, opts: { inlineImages: boolean }):
     card_number: String(p.id).padStart(6, '0'),
     issue_date: issue,
   }
-  const photoUrl = opts.inlineImages ? assetToDataUrl(p.photo_asset_id) : p.photo_asset_id ? `/api/assets/${p.photo_asset_id}` : null
-  const logoUrl = opts.inlineImages ? assetToDataUrl(company?.logo_asset_id) : company?.logo_asset_id ? `/api/assets/${company.logo_asset_id}` : null
+  const photoUrl = opts.inlineImages ? await assetToDataUrl(p.photo_asset_id) : p.photo_asset_id ? `/api/assets/${p.photo_asset_id}` : null
+  const logoUrl = opts.inlineImages ? await assetToDataUrl(company?.logo_asset_id) : company?.logo_asset_id ? `/api/assets/${company.logo_asset_id}` : null
   return { fields, photoUrl, logoUrl }
 }
 
 /** Dados de preenchimento para uma pessoa (imagens como data URL para render offline no canvas). */
-cardsRouter.get('/data/:personId', (req, res) => {
-  const p = getPerson(parseId(req.params.personId))
+cardsRouter.get('/data/:personId', async (req, res) => {
+  const p = await getPerson(parseId(req.params.personId))
   if (!p) throw new HttpError(404, 'Pessoa não encontrada.')
-  res.json(buildCardData(p, { inlineImages: req.query.inline !== '0' }))
+  res.json(await buildCardData(p, { inlineImages: req.query.inline !== '0' }))
 })
 
 /** Dados de exemplo para pré-visualizar um modelo sem pessoa. */
-cardsRouter.get('/sample', (_req, res) => {
-  const company = getDb().prepare('SELECT * FROM companies ORDER BY id LIMIT 1').get() as unknown as { name: string; cnpj: string | null; logo_asset_id: number | null } | undefined
+cardsRouter.get('/sample', async (_req, res) => {
+  const db = await getDb()
+  const company = await db.get<{ name: string; cnpj: string | null; logo_asset_id: number | null }>('SELECT name, cnpj, logo_asset_id FROM companies ORDER BY id LIMIT 1')
   const data: CardData = {
     fields: {
       full_name: 'Maria Aparecida da Silva',
@@ -73,7 +74,7 @@ cardsRouter.get('/sample', (_req, res) => {
       issue_date: new Date().toLocaleDateString('pt-BR'),
     },
     photoUrl: null,
-    logoUrl: assetToDataUrl(company?.logo_asset_id),
+    logoUrl: await assetToDataUrl(company?.logo_asset_id),
   }
   res.json(data)
 })

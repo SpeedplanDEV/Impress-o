@@ -4,16 +4,21 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Server } from 'node:http'
 
-// Diretório de dados isolado para os testes (definido antes de importar a config)
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'impresso-test-'))
-process.env.IMPRESSO_DATA_DIR = tmp
+/**
+ * Suíte de API executada contra os dois bancos suportados:
+ *  - SQLite local (api.sqlite.test.ts)
+ *  - Postgres em memória via PGlite (api.postgres.test.ts), o mesmo dialeto do Supabase/Neon
+ */
+export function runApiSuite(databaseUrl: string | null) {
+  // Diretório de dados isolado para os testes (definido antes de importar a config)
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'impresso-test-'))
+  process.env.IMPRESSO_DATA_DIR = tmp
+  if (databaseUrl) process.env.DATABASE_URL = databaseUrl
+  else delete process.env.DATABASE_URL
 
-const { createApp } = await import('../src/app.js')
-const { closeDb } = await import('../src/lib/db.js')
-
-let server: Server
-let base = ''
-let cookie = ''
+  let server: Server
+  let base = ''
+  let cookie = ''
 
 interface CallResult {
   status: number
@@ -75,17 +80,21 @@ function makePng(width: number, height: number): string {
 }
 
 beforeAll(async () => {
+  const { createApp } = await import('../src/app.js')
+  const { getDb } = await import('../src/lib/db.js')
+  await getDb()
   const app = createApp()
   await new Promise<void>((resolve) => {
     server = app.listen(0, '127.0.0.1', () => resolve())
   })
   const addr = server.address() as { port: number }
   base = `http://127.0.0.1:${addr.port}`
-})
+}, 60000)
 
 afterAll(async () => {
+  const { closeDb } = await import('../src/lib/db.js')
   await new Promise<void>((resolve) => server.close(() => resolve()))
-  closeDb()
+  await closeDb()
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
@@ -317,3 +326,4 @@ describe('custo e impressão', () => {
     await call('DELETE', `/api/printers/${p.data.id}`)
   })
 })
+}

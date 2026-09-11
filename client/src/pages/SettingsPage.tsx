@@ -99,13 +99,20 @@ export default function SettingsPage({ onAccountChanged }: { onAccountChanged: (
         {info.data && (
           <dl className="kv">
             <dt>Plataforma</dt><dd>{info.data.platform} · Node {info.data.nodeVersion}</dd>
+            <dt>Banco de dados</dt>
+            <dd>
+              {info.data.database.kind === 'postgres' ? <span className="badge ok">Postgres na nuvem</span> : <span className="badge">SQLite local</span>}{' '}
+              <span className="mono">{info.data.database.target}</span>
+            </dd>
             <dt>Pasta de dados</dt><dd className="mono">{info.data.paths.dataDir}</dd>
-            <dt>Banco de dados</dt><dd className="mono">{info.data.paths.dbPath}</dd>
-            <dt>Fotos e logos</dt><dd className="mono">{info.data.paths.uploadsDir}</dd>
             <dt>Saída de impressão</dt><dd className="mono">{info.data.paths.printOutputDir}</dd>
           </dl>
         )}
-        <p className="small muted" style={{ marginTop: 8 }}>Para fazer backup, copie a pasta de dados inteira com o sistema parado.</p>
+        <p className="small muted" style={{ marginTop: 8 }}>
+          {info.data?.database.kind === 'postgres'
+            ? 'Fotos, logos, modelos e histórico ficam no banco na nuvem; o backup é feito pelo provedor (Supabase/Neon). Só a saída de impressão fica nesta máquina.'
+            : 'Para fazer backup, copie a pasta de dados inteira com o sistema parado. Para usar um banco gratuito na nuvem (Supabase ou Neon), defina a variável DATABASE_URL — veja o README.'}
+        </p>
       </div>
 
       {editing && (

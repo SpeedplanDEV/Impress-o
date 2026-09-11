@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { getDb } from '../lib/db.js'
+import { getDb, nowIso, type Db } from '../lib/db.js'
 import { HttpError, parseId, validate } from '../lib/http.js'
 import { assetUrl, saveAsset } from '../lib/assets.js'
 import { getCompany, getDepartment } from './companies.js'
@@ -60,7 +60,7 @@ export function serializePerson(p: PersonJoined) {
     extra,
     templateId: p.template_id,
     templateName: p.template_name,
-    active: p.active === 1,
+    active: Number(p.active) === 1,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
   }
@@ -73,8 +73,9 @@ const SELECT_PERSON = `
   LEFT JOIN departments d ON d.id = p.department_id
   LEFT JOIN templates t ON t.id = p.template_id`
 
-export function getPerson(id: number): PersonJoined | null {
-  return (getDb().prepare(`${SELECT_PERSON} WHERE p.id = ?`).get(id) as unknown as PersonJoined | undefined) ?? null
+export async function getPerson(id: number): Promise<PersonJoined | null> {
+  const db = await getDb()
+  return (await db.get<PersonJoined>(`${SELECT_PERSON} WHERE p.id = ?`, [id])) ?? null
 }
 
 const personSchema = z.object({
@@ -95,50 +96,56 @@ const personSchema = z.object({
   photoDataUrl: z.string().nullable().optional(),
 })
 
-function checkRefs(companyId: number | null, departmentId: number | null): void {
-  if (companyId && !getCompany(companyId)) throw new HttpError(404, 'Empresa não encontrada.')
+async function checkRefs(companyId: number | null, departmentId: number | null): Promise<void> {
+  if (companyId && !(await getCompany(companyId))) throw new HttpError(404, 'Empresa não encontrada.')
   if (departmentId) {
-    const d = getDepartment(departmentId)
+    const d = await getDepartment(departmentId)
     if (!d) throw new HttpError(404, 'Departamento não encontrado.')
     if (companyId && d.company_id !== companyId) throw new HttpError(400, 'O departamento não pertence à empresa informada.')
   }
 }
 
-personsRouter.get('/', (req, res) => {
-  const q = typeof req.query.q === 'string' ? `%${req.query.q.trim()}%` : null
+personsRouter.get('/', async (req, res) => {
+  const q = typeof req.query.q === 'string' && req.query.q.trim() ? `%${req.query.q.trim().toLowerCase()}%` : null
   const companyId = req.query.companyId ? Number(req.query.companyId) : null
   const departmentId = req.query.departmentId ? Number(req.query.departmentId) : null
   const onlyActive = req.query.active === '1' || req.query.active === 'true'
-  const rows = getDb()
-    .prepare(
-      `${SELECT_PERSON}
-       WHERE (? IS NULL OR p.full_name LIKE ? OR p.registration LIKE ? OR p.role_title LIKE ?)
-         AND (? IS NULL OR p.company_id = ?)
-         AND (? IS NULL OR p.department_id = ?)
-         AND (? = 0 OR p.active = 1)
-       ORDER BY p.full_name COLLATE NOCASE`,
-    )
-    .all(q, q, q, q, companyId, companyId, departmentId, departmentId, onlyActive ? 1 : 0) as unknown as PersonJoined[]
+  const where: string[] = []
+  const params: (string | number)[] = []
+  if (q) {
+    where.push("(lower(p.full_name) LIKE ? OR lower(COALESCE(p.registration, '')) LIKE ? OR lower(COALESCE(p.role_title, '')) LIKE ?)")
+    params.push(q, q, q)
+  }
+  if (companyId) {
+    where.push('p.company_id = ?')
+    params.push(companyId)
+  }
+  if (departmentId) {
+    where.push('p.department_id = ?')
+    params.push(departmentId)
+  }
+  if (onlyActive) where.push('p.active = 1')
+  const db = await getDb()
+  const rows = await db.all<PersonJoined>(`${SELECT_PERSON} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY lower(p.full_name)`, params)
   res.json(rows.map(serializePerson))
 })
 
-personsRouter.get('/:id', (req, res) => {
-  const p = getPerson(parseId(req.params.id))
+personsRouter.get('/:id', async (req, res) => {
+  const p = await getPerson(parseId(req.params.id))
   if (!p) throw new HttpError(404, 'Pessoa não encontrada.')
   res.json(serializePerson(p))
 })
 
-personsRouter.post('/', (req, res) => {
+personsRouter.post('/', async (req, res) => {
   const body = validate(personSchema, req.body)
-  const companyId = body.companyId ?? (body.departmentId ? getDepartment(body.departmentId)?.company_id ?? null : null)
-  checkRefs(companyId, body.departmentId ?? null)
-  const photoId = body.photoDataUrl ? saveAsset('photo', body.photoDataUrl).id : null
-  const info = getDb()
-    .prepare(
-      `INSERT INTO persons (company_id, department_id, full_name, display_name, role_title, registration, document, email, phone, valid_until, photo_asset_id, extra_json, template_id, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+  const companyId = body.companyId ?? (body.departmentId ? ((await getDepartment(body.departmentId))?.company_id ?? null) : null)
+  await checkRefs(companyId, body.departmentId ?? null)
+  const photoId = body.photoDataUrl ? (await saveAsset('photo', body.photoDataUrl)).id : null
+  const db = await getDb()
+  const row = await db.get<{ id: number }>(
+    `INSERT INTO persons (company_id, department_id, full_name, display_name, role_title, registration, document, email, phone, valid_until, photo_asset_id, extra_json, template_id, active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    [
       companyId,
       body.departmentId ?? null,
       body.fullName,
@@ -153,21 +160,22 @@ personsRouter.post('/', (req, res) => {
       JSON.stringify(body.extra ?? {}),
       body.templateId ?? null,
       body.active === false ? 0 : 1,
-    )
-  res.status(201).json(serializePerson(getPerson(Number(info.lastInsertRowid))!))
+    ],
+  )
+  res.status(201).json(serializePerson((await getPerson(row!.id))!))
 })
 
-personsRouter.put('/:id', (req, res) => {
+personsRouter.put('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  const existing = getPerson(id)
+  const existing = await getPerson(id)
   if (!existing) throw new HttpError(404, 'Pessoa não encontrada.')
   const body = validate(personSchema.partial(), req.body)
   const companyId = body.companyId === undefined ? existing.company_id : body.companyId
   const departmentId = body.departmentId === undefined ? existing.department_id : body.departmentId
-  checkRefs(companyId, departmentId)
+  await checkRefs(companyId, departmentId)
   let photoId = existing.photo_asset_id
   if (body.photoDataUrl === null) photoId = null
-  else if (typeof body.photoDataUrl === 'string') photoId = saveAsset('photo', body.photoDataUrl).id
+  else if (typeof body.photoDataUrl === 'string') photoId = (await saveAsset('photo', body.photoDataUrl)).id
   const pick = <T>(v: T | undefined, fallback: T): T => (v === undefined ? fallback : v)
   let extra: Record<string, string> = {}
   try {
@@ -175,13 +183,12 @@ personsRouter.put('/:id', (req, res) => {
   } catch {
     extra = {}
   }
-  getDb()
-    .prepare(
-      `UPDATE persons SET company_id = ?, department_id = ?, full_name = ?, display_name = ?, role_title = ?, registration = ?, document = ?,
-        email = ?, phone = ?, valid_until = ?, photo_asset_id = ?, extra_json = ?, template_id = ?, active = ?, updated_at = datetime('now')
-       WHERE id = ?`,
-    )
-    .run(
+  const db = await getDb()
+  await db.run(
+    `UPDATE persons SET company_id = ?, department_id = ?, full_name = ?, display_name = ?, role_title = ?, registration = ?, document = ?,
+      email = ?, phone = ?, valid_until = ?, photo_asset_id = ?, extra_json = ?, template_id = ?, active = ?, updated_at = ?
+     WHERE id = ?`,
+    [
       companyId,
       departmentId,
       body.fullName ?? existing.full_name,
@@ -195,16 +202,19 @@ personsRouter.put('/:id', (req, res) => {
       photoId,
       JSON.stringify(body.extra ?? extra),
       pick(body.templateId, existing.template_id),
-      body.active === undefined ? existing.active : body.active ? 1 : 0,
+      body.active === undefined ? Number(existing.active) : body.active ? 1 : 0,
+      nowIso(),
       id,
-    )
-  res.json(serializePerson(getPerson(id)!))
+    ],
+  )
+  res.json(serializePerson((await getPerson(id))!))
 })
 
-personsRouter.delete('/:id', (req, res) => {
+personsRouter.delete('/:id', async (req, res) => {
   const id = parseId(req.params.id)
-  if (!getPerson(id)) throw new HttpError(404, 'Pessoa não encontrada.')
-  getDb().prepare('DELETE FROM persons WHERE id = ?').run(id)
+  if (!(await getPerson(id))) throw new HttpError(404, 'Pessoa não encontrada.')
+  const db = await getDb()
+  await db.run('DELETE FROM persons WHERE id = ?', [id])
   res.json({ ok: true })
 })
 
@@ -240,7 +250,7 @@ function normalizeHeader(h: string): string {
 export function slugifyField(h: string): string {
   return h
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9_]+/g, '_')
     .replace(/^_+|_+$/g, '')
@@ -256,7 +266,12 @@ function normalizeDate(v: string | undefined): string | null {
   return s
 }
 
-personsRouter.post('/import', (req, res) => {
+async function findCompanyByName(db: Db, name: string): Promise<number | null> {
+  const c = await db.get<{ id: number }>('SELECT id FROM companies WHERE lower(name) = lower(?)', [name])
+  return c?.id ?? null
+}
+
+personsRouter.post('/import', async (req, res) => {
   const body = validate(importSchema, req.body)
   const table = parseCsv(body.csv)
   if (table.length < 2) throw new HttpError(400, 'O CSV precisa de um cabeçalho e ao menos uma linha.')
@@ -275,20 +290,15 @@ personsRouter.post('/import', (req, res) => {
     throw new HttpError(400, 'Não encontrei a coluna "nome" no cabeçalho do CSV.')
   }
 
-  const db = getDb()
-  const defaultCompany = body.companyId ?? (body.departmentId ? getDepartment(body.departmentId)?.company_id ?? null : null)
-  checkRefs(defaultCompany, body.departmentId ?? null)
+  const defaultCompany = body.companyId ?? (body.departmentId ? ((await getDepartment(body.departmentId))?.company_id ?? null) : null)
+  await checkRefs(defaultCompany, body.departmentId ?? null)
 
-  const insert = db.prepare(
-    `INSERT INTO persons (company_id, department_id, full_name, display_name, role_title, registration, document, email, phone, valid_until, extra_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
   const errors: string[] = []
   const warnings: string[] = []
   let imported = 0
   let createdDepartments = 0
-  db.exec('BEGIN')
-  try {
+  const db = await getDb()
+  await db.transaction(async (tx) => {
     for (let r = 1; r < table.length; r++) {
       const row = table[r]
       if (row.every((c) => !c.trim())) continue
@@ -301,10 +311,11 @@ personsRouter.post('/import', (req, res) => {
       let companyId = defaultCompany
       const companyName = cell('company')
       if (!companyId && companyName) {
-        const c = db.prepare('SELECT id FROM companies WHERE name = ? COLLATE NOCASE').get(companyName) as unknown as { id: number } | undefined
-        if (c) companyId = c.id
+        const found = await findCompanyByName(tx, companyName)
+        if (found) companyId = found
         else if (body.createDepartments) {
-          companyId = Number(db.prepare('INSERT INTO companies (name) VALUES (?)').run(companyName).lastInsertRowid)
+          const created = await tx.get<{ id: number }>('INSERT INTO companies (name) VALUES (?) RETURNING id', [companyName])
+          companyId = created!.id
         } else {
           warnings.push(`Linha ${r + 1}: empresa "${companyName}" não encontrada; pessoa importada sem empresa.`)
         }
@@ -313,16 +324,17 @@ personsRouter.post('/import', (req, res) => {
       const departmentName = cell('department')
       if (!departmentId && departmentName) {
         if (companyId) {
-          const d = db.prepare('SELECT id FROM departments WHERE company_id = ? AND name = ? COLLATE NOCASE').get(companyId, departmentName) as unknown as { id: number } | undefined
+          const d = await tx.get<{ id: number }>('SELECT id FROM departments WHERE company_id = ? AND lower(name) = lower(?)', [companyId, departmentName])
           if (d) departmentId = d.id
           else if (body.createDepartments) {
-            departmentId = Number(db.prepare('INSERT INTO departments (company_id, name) VALUES (?, ?)').run(companyId, departmentName).lastInsertRowid)
+            const created = await tx.get<{ id: number }>('INSERT INTO departments (company_id, name) VALUES (?, ?) RETURNING id', [companyId, departmentName])
+            departmentId = created!.id
             createdDepartments++
           } else {
             warnings.push(`Linha ${r + 1}: departamento "${departmentName}" não encontrado na empresa; pessoa importada sem departamento.`)
           }
         } else {
-          const d = db.prepare('SELECT id, company_id FROM departments WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 1').get(departmentName) as unknown as { id: number; company_id: number } | undefined
+          const d = await tx.get<{ id: number; company_id: number }>('SELECT id, company_id FROM departments WHERE lower(name) = lower(?) ORDER BY id LIMIT 1', [departmentName])
           if (d) {
             departmentId = d.id
             companyId = d.company_id
@@ -341,25 +353,25 @@ personsRouter.post('/import', (req, res) => {
         const v = row[ec.index]?.trim()
         if (v) extra[ec.name] = v
       }
-      insert.run(
-        companyId,
-        departmentId,
-        fullName,
-        cell('display_name') || null,
-        cell('role_title') || null,
-        cell('registration') || null,
-        cell('document') || null,
-        cell('email') || null,
-        cell('phone') || null,
-        validUntil && /^\d{4}-\d{2}-\d{2}$/.test(validUntil) ? validUntil : null,
-        JSON.stringify(extra),
+      await tx.run(
+        `INSERT INTO persons (company_id, department_id, full_name, display_name, role_title, registration, document, email, phone, valid_until, extra_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          companyId,
+          departmentId,
+          fullName,
+          cell('display_name') || null,
+          cell('role_title') || null,
+          cell('registration') || null,
+          cell('document') || null,
+          cell('email') || null,
+          cell('phone') || null,
+          validUntil && /^\d{4}-\d{2}-\d{2}$/.test(validUntil) ? validUntil : null,
+          JSON.stringify(extra),
+        ],
       )
       imported++
     }
-    db.exec('COMMIT')
-  } catch (err) {
-    db.exec('ROLLBACK')
-    throw err
-  }
+  })
   res.json({ imported, createdDepartments, errors, warnings, extraColumns: extraCols.map((c) => c.name) })
 })

@@ -15,6 +15,8 @@ const dataDir = process.env.IMPRESSO_DATA_DIR
 export const config = {
   repoRoot,
   dataDir,
+  /** postgres://... (Supabase, Neon...) para usar um banco na nuvem; vazio = SQLite local. */
+  databaseUrl: process.env.DATABASE_URL?.trim() || null,
   dbPath: process.env.IMPRESSO_DB_PATH ? path.resolve(process.env.IMPRESSO_DB_PATH) : path.join(dataDir, 'impress-o.sqlite'),
   uploadsDir: path.join(dataDir, 'uploads'),
   printOutputDir: path.join(dataDir, 'print-output'),
@@ -22,6 +24,8 @@ export const config = {
   port: Number(process.env.PORT ?? 3070),
   host: process.env.HOST ?? '127.0.0.1',
   sessionTtlHours: 24 * 7,
+  /** Marca o cookie de sessão como Secure (use quando o sistema estiver atrás de HTTPS). */
+  secureCookies: process.env.IMPRESSO_SECURE_COOKIES === '1',
   platform: os.platform(),
   isTest: process.env.NODE_ENV === 'test' || process.env.VITEST === 'true',
 }
