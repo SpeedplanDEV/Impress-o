@@ -1,9 +1,11 @@
-import 'dotenv/config'
+import { config as loadEnv } from 'dotenv'
 import { createApp } from './app.js'
 import { config } from './lib/config.js'
 import { describeDatabase, getDb, nowIso } from './lib/db.js'
 import { importarUploadsAntigos } from './lib/assets.js'
 import fs from 'node:fs'
+
+loadEnv({ quiet: true })
 
 async function main() {
   fs.mkdirSync(config.printOutputDir, { recursive: true })

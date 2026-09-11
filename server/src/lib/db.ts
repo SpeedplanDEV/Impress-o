@@ -242,10 +242,10 @@ async function migrate(db: Db): Promise<void> {
 /* SQLite                                                              */
 /* ------------------------------------------------------------------ */
 
-class SqliteDb implements Db {
+/** Operações de uma transação SQLite já aberta (mesma conexão, sem novo BEGIN). */
+class SqliteTxDb implements Db {
   readonly dialect = 'sqlite' as const
   private conn: import('node:sqlite').DatabaseSync
-  private depth = 0
 
   constructor(conn: import('node:sqlite').DatabaseSync) {
     this.conn = conn
@@ -271,22 +271,98 @@ class SqliteDb implements Db {
   }
 
   async transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
-    if (this.depth > 0) return fn(this)
-    this.depth++
-    this.conn.exec('BEGIN')
+    return fn(this)
+  }
+
+  async close(): Promise<void> {
+    /* a conexão é da SqliteDb */
+  }
+}
+
+/**
+ * Conexão SQLite compartilhada.
+ *
+ * As chamadas são síncronas por baixo, mas o código que as usa é assíncrono:
+ * entre um `await` e outro de uma transação, outra requisição poderia executar
+ * na mesma conexão e ficar "dentro" daquela transação. Por isso a transação
+ * segura um bloqueio, e todas as demais operações esperam ele liberar.
+ */
+class SqliteDb implements Db {
+  readonly dialect = 'sqlite' as const
+  private conn: import('node:sqlite').DatabaseSync
+  private inner: SqliteTxDb
+  /** Fila de execução: garante que nada entra na conexão enquanto uma transação está aberta. */
+  private tail: Promise<void> = Promise.resolve()
+
+  constructor(conn: import('node:sqlite').DatabaseSync) {
+    this.conn = conn
+    this.inner = new SqliteTxDb(conn)
+  }
+
+  private acquire(): Promise<() => void> {
+    let release: () => void = () => {}
+    const mine = new Promise<void>((r) => {
+      release = r
+    })
+    const prev = this.tail
+    this.tail = prev.then(() => mine)
+    return prev.then(() => release)
+  }
+
+  async get<T = Row>(sql: string, params: Param[] = []): Promise<T | undefined> {
+    const release = await this.acquire()
     try {
-      const result = await fn(this)
-      this.conn.exec('COMMIT')
-      return result
-    } catch (err) {
-      try {
-        this.conn.exec('ROLLBACK')
-      } catch {
-        /* ignore */
-      }
-      throw err
+      return await this.inner.get<T>(sql, params)
     } finally {
-      this.depth--
+      release()
+    }
+  }
+
+  async all<T = Row>(sql: string, params: Param[] = []): Promise<T[]> {
+    const release = await this.acquire()
+    try {
+      return await this.inner.all<T>(sql, params)
+    } finally {
+      release()
+    }
+  }
+
+  async run(sql: string, params: Param[] = []): Promise<{ changes: number }> {
+    const release = await this.acquire()
+    try {
+      return await this.inner.run(sql, params)
+    } finally {
+      release()
+    }
+  }
+
+  async exec(sql: string): Promise<void> {
+    const release = await this.acquire()
+    try {
+      await this.inner.exec(sql)
+    } finally {
+      release()
+    }
+  }
+
+  async transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
+    const release = await this.acquire()
+    try {
+      this.conn.exec('BEGIN')
+      try {
+        const result = await fn(this.inner)
+        this.conn.exec('COMMIT')
+        return result
+      } catch (err) {
+        try {
+          this.conn.exec('ROLLBACK')
+        } catch {
+          /* ignore */
+        }
+        throw err
+      }
+    } finally {
+      release()
     }
   }
 
