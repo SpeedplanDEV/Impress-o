@@ -373,13 +373,34 @@ class PgBaseDb implements Db {
   }
 }
 
+/**
+ * Prepara a URL para o driver `pg`.
+ *
+ * O `pg` deixa o `sslmode` da URL sobrepor a opção `ssl` passada no código, e
+ * as semânticas mudaram entre versões. Para o comportamento ser previsível, o
+ * parâmetro é removido da URL e o SSL é decidido aqui:
+ *  - sslmode=disable ou host local: sem SSL;
+ *  - demais casos (Supabase, Neon...): SSL ligado. Por padrão sem validar a
+ *    cadeia de certificados (funciona com qualquer provedor); com
+ *    IMPRESSO_DB_SSL=verify a cadeia é validada.
+ */
+export function prepareDatabaseUrl(url: string, env: NodeJS.ProcessEnv = process.env): { connectionString: string; ssl: false | { rejectUnauthorized: boolean } } {
+  const u = new URL(url)
+  const sslmode = u.searchParams.get('sslmode')
+  u.searchParams.delete('sslmode')
+  u.searchParams.delete('uselibpqcompat')
+  const local = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(u.hostname)
+  const ssl = sslmode === 'disable' || (local && !sslmode) ? false : { rejectUnauthorized: env.IMPRESSO_DB_SSL === 'verify' }
+  return { connectionString: u.toString(), ssl }
+}
+
 async function openPostgres(url: string): Promise<Db> {
   const pg = await import('pg')
   // int8 (COUNT, SUM de inteiros) e numeric chegam como texto por padrão; aqui viram número.
   pg.types.setTypeParser(20, (v: string) => Number(v))
   pg.types.setTypeParser(1700, (v: string) => Number(v))
-  const needsSsl = !/localhost|127\.0\.0\.1/.test(url) && !/sslmode=disable/.test(url)
-  const pool = new pg.Pool({ connectionString: url, max: 5, ssl: needsSsl ? { rejectUnauthorized: false } : undefined })
+  const { connectionString, ssl } = prepareDatabaseUrl(url)
+  const pool = new pg.Pool({ connectionString, max: 5, ssl, connectionTimeoutMillis: 15000 })
   pool.on('error', (err) => console.error('[db] erro no pool Postgres:', err.message))
   // Sem parâmetros o pg usa o protocolo simples, que aceita várias instruções.
   const wrap = (c: { query: (sql: string, params?: unknown[]) => Promise<{ rows: Row[]; rowCount: number | null }> }): PgLikeQueryable => ({
