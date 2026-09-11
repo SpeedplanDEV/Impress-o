@@ -1,0 +1,45 @@
+{
+  "name": "impress-o",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema de impress\u00e3o de cart\u00f5es/crach\u00e1s personalizados para impressoras Entrust Sigma DS",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch server/src/index.ts",
+    "dev:client": "vite",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p server/tsconfig.json",
+    "build:client": "vite build",
+    "start": "node --no-warnings=ExperimentalWarning dist/server/src/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "fabric": "^7.4.0",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-easy-crop": "^6.2.3",
+    "react-router-dom": "^7.18.3",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.2",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
+  }
+}
