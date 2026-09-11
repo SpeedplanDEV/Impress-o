@@ -11,6 +11,7 @@ import { CR80, PHOTO_3X4, mmToPx, pxToMm } from '@shared/card'
 import { DYNAMIC_FIELDS, EXTRA_PROPS, FIELD_LABELS, type CardData, type CardSideDesign, type CardTemplateDoc, type ElementMeta, type ElementRole } from '@shared/template'
 import { loadSideIntoCanvas, metaOf, setMeta, serializeCanvas } from './render'
 import { fileToDataUrl } from '../lib/api'
+import FilePicker from '../components/FilePicker'
 
 const FONTS = ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Segoe UI', 'Calibri', 'Georgia', 'Times New Roman', 'Courier New', 'Impact']
 const ROLE_LABELS: Record<ElementRole, string> = {
@@ -116,6 +117,27 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
       }
     })
     canvas.on('text:editing:exited', () => commit())
+    // Rótulos dos espaços (foto, logo, QR) só na tela do editor; nunca vão para a impressão
+    canvas.on('after:render', ({ ctx }) => {
+      if (previewRef.current) return
+      const vpt = canvas.viewportTransform
+      for (const obj of canvas.getObjects()) {
+        const m = metaOf(obj)
+        if (m.role !== 'photo' && m.role !== 'logo' && m.role !== 'qr') continue
+        const c = obj.getCenterPoint()
+        const x = c.x * vpt[0] + vpt[4]
+        const y = c.y * vpt[3] + vpt[5]
+        const label = m.role === 'photo' ? 'FOTO 3x4' : m.role === 'logo' ? 'LOGO' : 'QR'
+        const size = Math.max(10, Math.min(16, obj.getScaledWidth() * vpt[0] * 0.12))
+        ctx.save()
+        ctx.font = `600 ${size}px "Segoe UI", system-ui, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillStyle = 'rgba(31, 41, 51, 0.55)'
+        ctx.fillText(label, x, y)
+        ctx.restore()
+      }
+    })
     return () => {
       canvas.dispose()
       canvasRef.current = null
@@ -428,10 +450,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
           <button className="btn small" onClick={addRect}>+ Retângulo</button>
           <button className="btn small" onClick={addCircle}>+ Círculo</button>
           <button className="btn small" onClick={addLine}>+ Linha</button>
-          <label className="btn small" title="Inserir imagem (PNG, JPG, SVG)">
-            + Imagem
-            <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void addImage(f); e.target.value = '' }} />
-          </label>
+          <FilePicker accept="image/*" title="Inserir imagem (PNG, JPG, SVG)" onFile={(f) => void addImage(f)}>+ Imagem</FilePicker>
         </fieldset>
         <div className="btn-group">
           <button className="btn small" onClick={undo} title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={preview}>↶</button>
@@ -482,10 +501,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
               Cor
               <input type="color" value={typeof canvasRef.current?.backgroundColor === 'string' ? canvasRef.current.backgroundColor : currentSide.backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} style={{ width: 48, padding: 2 }} />
             </label>
-            <label className="btn small">
-              Imagem de fundo
-              <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void setBackgroundImage(f); e.target.value = '' }} />
-            </label>
+            <FilePicker accept="image/*" onFile={(f) => void setBackgroundImage(f)}>Imagem de fundo</FilePicker>
             <button className="btn small ghost" onClick={() => void setBackgroundImage(null)}>Remover imagem</button>
           </div>
           <hr />

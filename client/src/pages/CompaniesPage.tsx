@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { companiesApi, departmentsApi, templatesApi, fileToDataUrl } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
 import Modal from '../components/Modal'
+import FilePicker from '../components/FilePicker'
 import type { Company, Department } from '../lib/types'
 
 export default function CompaniesPage() {
@@ -184,10 +185,7 @@ function CompanyForm({ initial, templates, onClose, onSaved }: { initial: Partia
           Logo (PNG com fundo transparente recomendado)
           <div className="row">
             {logoPreview ? <img src={logoPreview} alt="" className="thumb" style={{ width: 120, height: 60 }} /> : <span className="muted small">Sem logo</span>}
-            <label className="btn small">
-              Escolher…
-              <input type="file" accept="image/*" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) { const d = await fileToDataUrl(f); setLogo(d); setLogoPreview(d) } e.target.value = '' }} />
-            </label>
+            <FilePicker accept="image/*" onFile={async (f) => { const d = await fileToDataUrl(f); setLogo(d); setLogoPreview(d) }}>Escolher…</FilePicker>
             {logoPreview && <button type="button" className="btn small ghost" onClick={() => { setLogo(null); setLogoPreview(null) }}>Remover</button>}
           </div>
         </label>

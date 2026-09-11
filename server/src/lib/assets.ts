@@ -112,7 +112,10 @@ export function getAsset(id: number): AssetRow | null {
 export function deleteAsset(id: number): void {
   const asset = getAsset(id)
   if (!asset) return
-  getDb().prepare('DELETE FROM assets WHERE id = ?').run(id)
+  const db = getDb()
+  db.prepare('UPDATE companies SET logo_asset_id = NULL WHERE logo_asset_id = ?').run(id)
+  db.prepare('UPDATE persons SET photo_asset_id = NULL WHERE photo_asset_id = ?').run(id)
+  db.prepare('DELETE FROM assets WHERE id = ?').run(id)
   try {
     fs.unlinkSync(assetPath(asset))
   } catch {

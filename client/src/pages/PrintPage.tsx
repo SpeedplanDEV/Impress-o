@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { cardsApi, companiesApi, departmentsApi, personsApi, printApi, printersApi, templatesApi, costApi, downloadBlob, errorMessage } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
@@ -24,6 +24,8 @@ export default function PrintPage() {
   const [companyId, setCompanyId] = useState<number | null>(null)
   const [departmentId, setDepartmentId] = useState<number | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set(initialPerson ? [initialPerson] : []))
+  /** Pessoas selecionadas, mesmo quando o filtro atual as esconde. */
+  const selectedMap = useRef(new Map<number, Person>())
   const [templateOverride, setTemplateOverride] = useState<number | null>(null)
   const [printerId, setPrinterId] = useState<number | null>(null)
   const [copies, setCopies] = useState(1)
@@ -47,7 +49,10 @@ export default function PrintPage() {
     }
   }, [printers.data, printerId])
 
-  const selectedPersons = useMemo(() => (persons.data ?? []).filter((p) => selected.has(p.id)), [persons.data, selected])
+  useEffect(() => {
+    for (const p of persons.data ?? []) if (selected.has(p.id)) selectedMap.current.set(p.id, p)
+  }, [persons.data, selected])
+  const selectedPersons = useMemo(() => [...selected].map((id) => selectedMap.current.get(id)).filter((p): p is Person => !!p), [selected, persons.data])
   const sides = rendered.some((r) => r.back) ? 2 : 1
   const [stale, setStale] = useState(false)
   useEffect(() => {
@@ -68,6 +73,8 @@ export default function PrintPage() {
   }, [selected, templateOverride])
 
   function toggle(id: number) {
+    const p = persons.data?.find((x) => x.id === id)
+    if (p) selectedMap.current.set(id, p)
     setSelected((s) => {
       const n = new Set(s)
       if (n.has(id)) n.delete(id)
@@ -182,9 +189,9 @@ export default function PrintPage() {
             </select>
           </div>
           <div className="row" style={{ marginBottom: 8 }}>
-            <button className="btn small" onClick={() => setSelected(new Set((persons.data ?? []).map((p) => p.id)))}>Selecionar todos ({persons.data?.length ?? 0})</button>
+            <button className="btn small" onClick={() => { for (const p of persons.data ?? []) selectedMap.current.set(p.id, p); setSelected((s) => new Set([...s, ...(persons.data ?? []).map((p) => p.id)])) }}>Selecionar todos os listados ({persons.data?.length ?? 0})</button>
             <button className="btn small ghost" onClick={() => setSelected(new Set())}>Limpar</button>
-            <span className="muted small">{selected.size} selecionada(s)</span>
+            <span className="muted small">{selected.size} selecionada(s){selected.size > selectedPersons.filter((p) => persons.data?.some((x) => x.id === p.id)).length ? ' (algumas fora do filtro atual)' : ''}</span>
           </div>
           <div style={{ maxHeight: 360, overflow: 'auto' }}>
             {persons.data?.length === 0 && <div className="empty">Nenhuma pessoa ativa encontrada.</div>}

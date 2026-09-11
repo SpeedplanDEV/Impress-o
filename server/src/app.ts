@@ -44,10 +44,10 @@ export function createApp() {
     }
     next()
   })
+  // Rotas públicas (status, setup, login) aceitam apenas corpos pequenos
+  app.use('/api/auth', express.json({ limit: '16kb' }), authRouter)
+  // Demais rotas recebem imagens em base64 (fotos, logos, PNG do cartão)
   app.use(express.json({ limit: '40mb' }))
-
-  // Rotas públicas (status, setup, login)
-  app.use('/api/auth', authRouter)
   // Todas as demais rotas exigem sessão
   app.use('/api', requireAuth, apiRouter)
 

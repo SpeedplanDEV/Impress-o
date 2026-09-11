@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Cropper, { type Area } from 'react-easy-crop'
 import Modal from './Modal'
+import FilePicker from './FilePicker'
 import { fileToDataUrl } from '../lib/api'
 
 const OUT_W = 600
@@ -104,10 +105,7 @@ export default function PhotoCropper({ onDone, onClose }: Props) {
       </>
     }>
       <div className="row" style={{ marginBottom: 10 }}>
-        <label className="btn">
-          Escolher arquivo…
-          <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = '' }} />
-        </label>
+        <FilePicker className="btn" accept="image/*" onFile={(f) => void onFile(f)}>Escolher arquivo…</FilePicker>
         <button className="btn" onClick={() => { setError(null); setCamera((c) => !c) }}>{camera ? 'Fechar câmera' : 'Usar webcam'}</button>
         <span className="muted small">Arraste para posicionar; a proporção 3:4 (30 × 40 mm) é mantida automaticamente.</span>
       </div>

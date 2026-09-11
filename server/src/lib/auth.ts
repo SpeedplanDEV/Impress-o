@@ -11,12 +11,14 @@ import { config } from './config.js'
 
 export const SESSION_COOKIE = 'impresso_session'
 
-const SCRYPT_N = 16384
+const SCRYPT_N = 32768
 const SCRYPT_KEYLEN = 64
+/** Memória necessária: 128 * N * r (r = 8) com folga. */
+const scryptOptions = (n: number) => ({ N: n, r: 8, p: 1, maxmem: 128 * n * 8 * 2 })
 
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16)
-  const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, { N: SCRYPT_N })
+  const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, scryptOptions(SCRYPT_N))
   return `scrypt$${SCRYPT_N}$${salt.toString('base64')}$${derived.toString('base64')}`
 }
 
@@ -24,9 +26,10 @@ export function verifyPassword(password: string, stored: string): boolean {
   const parts = stored.split('$')
   if (parts.length !== 4 || parts[0] !== 'scrypt') return false
   const n = Number(parts[1])
+  if (!Number.isInteger(n) || n < 1024 || n > 1 << 20) return false
   const salt = Buffer.from(parts[2], 'base64')
   const expected = Buffer.from(parts[3], 'base64')
-  const derived = crypto.scryptSync(password, salt, expected.length, { N: n })
+  const derived = crypto.scryptSync(password, salt, expected.length, scryptOptions(n))
   return derived.length === expected.length && crypto.timingSafeEqual(derived, expected)
 }
 

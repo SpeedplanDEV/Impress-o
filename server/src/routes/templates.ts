@@ -79,6 +79,20 @@ function checkRefs(companyId: number | null, departmentId: number | null): numbe
   return companyId
 }
 
+const MAX_DESIGN_BYTES = 8 * 1024 * 1024
+const MAX_OBJECTS_PER_SIDE = 500
+
+/** Limites estruturais para desenhos vindos do cliente ou de arquivos importados. */
+function checkDesignLimits(doc: CardTemplateDoc): void {
+  const bytes = Buffer.byteLength(JSON.stringify(doc), 'utf8')
+  if (bytes > MAX_DESIGN_BYTES) throw new HttpError(413, `O modelo é muito grande (${(bytes / 1024 / 1024).toFixed(1)} MB; máximo 8 MB). Reduza as imagens usadas no desenho.`)
+  for (const side of [doc.front, doc.back]) {
+    if (!side) continue
+    const objects = side.fabric.objects as unknown[]
+    if (objects.length > MAX_OBJECTS_PER_SIDE) throw new HttpError(400, `O modelo tem elementos demais (${objects.length}; máximo ${MAX_OBJECTS_PER_SIDE} por lado).`)
+  }
+}
+
 function parseIncomingDesign(design: unknown, name: string): CardTemplateDoc {
   const withName = design && typeof design === 'object' ? { ...(design as Record<string, unknown>) } : design
   if (withName && typeof withName === 'object') {
@@ -90,6 +104,7 @@ function parseIncomingDesign(design: unknown, name: string): CardTemplateDoc {
   const parsed = validateTemplateDoc(withName)
   if (!parsed.ok) throw new HttpError(400, parsed.error)
   parsed.doc.name = name
+  checkDesignLimits(parsed.doc)
   return parsed.doc
 }
 
@@ -156,6 +171,7 @@ templatesRouter.post('/import', (req, res) => {
   )
   const parsed = validateTemplateDoc(body.design)
   if (!parsed.ok) throw new HttpError(400, `Não foi possível importar: ${parsed.error}`)
+  checkDesignLimits(parsed.doc)
   const name = body.name || parsed.doc.name
   parsed.doc.name = name
   const companyId = checkRefs(body.companyId ?? null, body.departmentId ?? null)

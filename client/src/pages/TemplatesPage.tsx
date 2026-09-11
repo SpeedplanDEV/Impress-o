@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { companiesApi, departmentsApi, templatesApi, fileToText } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
 import Modal from '../components/Modal'
+import FilePicker from '../components/FilePicker'
 import { emptyTemplateDoc } from '@shared/template'
 import { renderThumbnail } from '../editor/render'
 import type { TemplateFull } from '../lib/types'
@@ -223,10 +224,7 @@ function ImportTemplateModal({ companies, onClose, onImported }: { companies: { 
     <Modal title="Importar modelo" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={!design} onClick={() => void run()}>Importar</button></>}>
       <div className="stack">
         <p className="small muted">Importa arquivos <code>.impresso.json</code> exportados por este sistema (menu Exportar de um modelo). Para usar uma arte pronta (PNG/JPG) como base, crie um modelo em branco e use "Imagem de fundo" no editor.</p>
-        <label className="btn">
-          Escolher arquivo…
-          <input type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = '' }} />
-        </label>
+        <FilePicker className="btn" accept=".json,application/json" onFile={(f) => void onFile(f)}>Escolher arquivo…</FilePicker>
         {fileName && <div className="small">Arquivo: {fileName}</div>}
         <label>Nome (opcional)<input value={name} onChange={(e) => setName(e.target.value)} /></label>
         <CompanyDeptPicker companies={companies} companyId={companyId} departmentId={departmentId} onChange={(c, d) => { setCompanyId(c); setDepartmentId(d) }} />

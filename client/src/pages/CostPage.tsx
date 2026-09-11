@@ -7,7 +7,9 @@ import { brl, brl4 } from '../lib/format'
 export default function CostPage() {
   const loaded = useAsync(() => costApi.params())
   const presets = useAsync(() => costApi.presets())
-  const summary = useAsync(() => costApi.summary())
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const summary = useAsync(() => costApi.summary({ from: from || undefined, to: to || undefined }), [from, to])
   const [params, setParams] = useState<CostParams | null>(null)
   const [sides, setSides] = useState<1 | 2>(1)
   const [quantity, setQuantity] = useState(100)
@@ -153,7 +155,13 @@ export default function CostPage() {
             )}
           </div>
           <div className="card">
-            <h2>Impressões realizadas</h2>
+            <div className="row between">
+              <h2 style={{ margin: 0 }}>Impressões realizadas</h2>
+              <div className="row">
+                <label className="inline">De <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 150 }} /></label>
+                <label className="inline">Até <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 150 }} /></label>
+              </div>
+            </div>
             {summary.data && (
               <>
                 <div className="grid cols-3">

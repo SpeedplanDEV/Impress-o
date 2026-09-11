@@ -105,6 +105,10 @@ describe('autenticação de usuário único', () => {
     const again = await call('POST', '/api/auth/setup', { name: 'Outro', password: 'segredo123' })
     expect(again.status).toBe(409)
   })
+  it('rotas de login aceitam apenas corpos pequenos', async () => {
+    const r = await call('POST', '/api/auth/login', { password: 'x'.repeat(40_000) })
+    expect(r.status).toBe(413)
+  })
   it('cookie malformado de outro app não derruba a API', async () => {
     const r = await call('GET', '/api/auth/status', undefined, { headers: { cookie: 'layout=100%; outro=%zz' } })
     expect(r.status).toBe(200)
@@ -186,6 +190,26 @@ describe('empresas, departamentos e pessoas', () => {
     expect(maria.validUntil).toBe('2027-12-31')
     expect(maria.extra).toEqual({ tipo_sanguineo: 'O+' })
   })
+  it('mover departamento de empresa leva as pessoas junto', async () => {
+    const other = await call('POST', '/api/companies', { name: 'Filial Sul' })
+    const dept = await call('POST', '/api/departments', { companyId, name: 'Logística' })
+    const p = await call('POST', '/api/persons', { fullName: 'Rita Moura', departmentId: dept.data.id })
+    expect(p.data.companyId).toBe(companyId)
+    const moved = await call('PUT', `/api/departments/${dept.data.id}`, { companyId: other.data.id })
+    expect(moved.status).toBe(200)
+    const rita = (await call('GET', `/api/persons/${p.data.id}`)).data
+    expect(rita.companyId).toBe(other.data.id)
+    expect(rita.departmentId).toBe(dept.data.id)
+    await call('DELETE', `/api/companies/${other.data.id}`)
+  })
+  it('excluir arquivo remove a referência do logo da empresa', async () => {
+    const c = (await call('GET', `/api/companies/${companyId}`)).data
+    expect(c.logoAssetId).toBeTruthy()
+    expect((await call('DELETE', `/api/assets/${c.logoAssetId}`)).status).toBe(200)
+    const after = (await call('GET', `/api/companies/${companyId}`)).data
+    expect(after.logoAssetId).toBeNull()
+    expect(after.logoUrl).toBeNull()
+  })
   it('rejeita departamento de outra empresa', async () => {
     const other = await call('POST', '/api/companies', { name: 'Outra' })
     const r = await call('PUT', `/api/persons/${personId}`, { companyId: other.data.id, departmentId })
@@ -214,6 +238,13 @@ describe('modelos', () => {
     expect(imp.data.name).toBe('Importado')
     const bad = await call('POST', '/api/templates/import', { design: { foo: 1 } })
     expect(bad.status).toBe(400)
+  })
+  it('recusa modelo com elementos demais', async () => {
+    const exp = (await call('GET', `/api/templates/${templateId}/export`)).data
+    const huge = { ...exp, front: { ...exp.front, fabric: { ...exp.front.fabric, objects: Array.from({ length: 501 }, () => ({ type: 'Rect', left: 0, top: 0, width: 10, height: 10 })) } } }
+    const r = await call('POST', '/api/templates/import', { design: huge })
+    expect(r.status).toBe(400)
+    expect(r.data.error).toContain('elementos demais')
   })
   it('resolve o modelo da pessoa pelo departamento', async () => {
     const persons = (await call('GET', '/api/persons?q=Pedro')).data

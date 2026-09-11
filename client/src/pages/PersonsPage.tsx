@@ -4,6 +4,7 @@ import { companiesApi, departmentsApi, personsApi, templatesApi, fileToText, typ
 import { useAsync } from '../lib/useAsync'
 import Modal from '../components/Modal'
 import PhotoCropper from '../components/PhotoCropper'
+import FilePicker from '../components/FilePicker'
 import { formatDate } from '../lib/format'
 import type { Person } from '../lib/types'
 
@@ -273,10 +274,7 @@ function ImportCsvModal({ companies, onClose, onDone }: { companies: { id: numbe
         Colunas reconhecidas (cabeçalho na primeira linha, separador vírgula, ponto e vírgula ou tabulação): <strong>nome</strong> (obrigatória), cargo, departamento, empresa, matrícula, documento, email, telefone, validade (dd/mm/aaaa). Colunas extras viram campos extras da pessoa.
       </p>
       <div className="row" style={{ marginBottom: 10 }}>
-        <label className="btn">
-          Escolher arquivo .csv…
-          <input type="file" accept=".csv,text/csv,text/plain" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCsv(await fileToText(f)); e.target.value = '' }} />
-        </label>
+        <FilePicker className="btn" accept=".csv,text/csv,text/plain" onFile={async (f) => setCsv(await fileToText(f))}>Escolher arquivo .csv…</FilePicker>
         <select value={companyId ?? ''} onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)} style={{ maxWidth: 260 }}>
           <option value="">Empresa: usar a coluna "empresa"</option>
           {companies.map((c) => <option key={c.id} value={c.id}>Empresa: {c.name}</option>)}

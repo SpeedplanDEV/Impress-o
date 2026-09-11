@@ -179,15 +179,26 @@ departmentsRouter.put('/:id', (req, res) => {
   const name = body.name ?? existing.name
   const dup = getDb().prepare('SELECT id FROM departments WHERE company_id = ? AND name = ? COLLATE NOCASE AND id != ?').get(companyId, name, id)
   if (dup) throw new HttpError(409, 'Já existe um departamento com esse nome nesta empresa.')
-  getDb()
-    .prepare(`UPDATE departments SET company_id = ?, name = ?, color = ?, default_template_id = ?, updated_at = datetime('now') WHERE id = ?`)
-    .run(
+  const db = getDb()
+  db.exec('BEGIN')
+  try {
+    db.prepare(`UPDATE departments SET company_id = ?, name = ?, color = ?, default_template_id = ?, updated_at = datetime('now') WHERE id = ?`).run(
       companyId,
       name,
       body.color === undefined ? existing.color : body.color,
       body.defaultTemplateId === undefined ? existing.default_template_id : body.defaultTemplateId,
       id,
     )
+    if (companyId !== existing.company_id) {
+      // Pessoas e modelos do departamento acompanham a mudança de empresa
+      db.prepare(`UPDATE persons SET company_id = ?, updated_at = datetime('now') WHERE department_id = ?`).run(companyId, id)
+      db.prepare(`UPDATE templates SET company_id = ?, updated_at = datetime('now') WHERE department_id = ?`).run(companyId, id)
+    }
+    db.exec('COMMIT')
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
   res.json(serializeDepartment(getDepartment(id)!))
 })
 

@@ -32,6 +32,11 @@ foto 3x4, nome, logo e layout totalmente personalizável, integrado à impressor
 
 ## Instalação e uso
 
+**Windows:** dê dois cliques em `iniciar.bat` (instala as dependências e compila na primeira vez, depois
+abre o navegador em <http://localhost:3070>). **Linux/macOS:** `./iniciar.sh`.
+
+Ou manualmente:
+
 ```bash
 npm install
 npm run build
