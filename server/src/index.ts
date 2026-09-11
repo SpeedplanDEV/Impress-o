@@ -1,11 +1,9 @@
-import { config as loadEnv } from 'dotenv'
+import './lib/env.js'
 import { createApp } from './app.js'
 import { config } from './lib/config.js'
 import { describeDatabase, getDb, nowIso } from './lib/db.js'
 import { importarUploadsAntigos } from './lib/assets.js'
 import fs from 'node:fs'
-
-loadEnv({ quiet: true })
 
 async function main() {
   fs.mkdirSync(config.printOutputDir, { recursive: true })
@@ -13,7 +11,7 @@ async function main() {
   console.log(`Banco de dados: ${info.kind === 'postgres' ? `Postgres (${info.target})` : info.kind === 'pglite' ? 'Postgres em memória' : `SQLite (${info.target})`}`)
   const db = await getDb()
   // Trabalhos interrompidos por um reinício do servidor não podem ficar "imprimindo" para sempre
-  await db.run(`UPDATE print_jobs SET status = 'error', error = 'Interrompido: o servidor foi reiniciado durante a impressão.', finished_at = ? WHERE status IN ('queued', 'printing')`, [nowIso()])
+  await db.run(`UPDATE print_jobs SET status = 'error', error = 'Interrompido: o servidor foi reiniciado durante a impressão.', finished_at = ? WHERE instance_id = ? AND status IN ('queued', 'printing')`, [nowIso(), config.instanceId])
   const importados = await importarUploadsAntigos()
   if (importados > 0) console.log(`${importados} arquivo(s) de data/uploads importado(s) para o banco.`)
 

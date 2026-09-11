@@ -63,6 +63,7 @@ interface JobRow {
   unit_cost: number | null
   total_cost: number | null
   output_path: string | null
+  instance_id: string | null
   created_at: string
   finished_at: string | null
 }
@@ -84,6 +85,7 @@ function serializeJob(j: JobRow) {
     unitCost: j.unit_cost,
     totalCost: j.total_cost,
     outputPath: j.output_path,
+    thisMachine: !j.instance_id || j.instance_id === config.instanceId,
     createdAt: j.created_at,
     finishedAt: j.finished_at,
   }
@@ -129,6 +131,7 @@ printRouter.post('/jobs', async (req, res) => {
   const body = validate(jobSchema, req.body)
   const printer = body.printerId ? await getPrinter(body.printerId) : await getDefaultPrinter()
   if (!printer) throw new HttpError(400, 'Nenhuma impressora configurada. Cadastre a Sigma DS em Configurações.')
+  if (printer.instanceId && printer.instanceId !== config.instanceId) throw new HttpError(400, 'Essa impressora está cadastrada em outro computador. Cadastre a impressora deste computador em Configurações.')
 
   const frontPng = pngFromDataUrl(body.frontPng, 'Frente')
   checkSize(frontPng, body.orientation, 'Frente')
@@ -147,9 +150,9 @@ printRouter.post('/jobs', async (req, res) => {
   const cost = computeCardCost(costParams, { sides, quantity: body.copies })
 
   const inserted = await db.get<{ id: number }>(
-    `INSERT INTO print_jobs (printer_id, printer_name, person_id, template_id, person_name, template_name, copies, sides, status, cost_json, unit_cost, total_cost)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'printing', ?, ?, ?) RETURNING id`,
-    [printer.id, printer.name, body.personId ?? null, body.templateId ?? null, body.personName ?? null, body.templateName ?? null, body.copies, sides, JSON.stringify(cost), cost.unitCost, cost.totalCost],
+    `INSERT INTO print_jobs (printer_id, printer_name, person_id, template_id, person_name, template_name, copies, sides, status, cost_json, unit_cost, total_cost, instance_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'printing', ?, ?, ?, ?) RETURNING id`,
+    [printer.id, printer.name, body.personId ?? null, body.templateId ?? null, body.personName ?? null, body.templateName ?? null, body.copies, sides, JSON.stringify(cost), cost.unitCost, cost.totalCost, config.instanceId],
   )
   const jobId = inserted!.id
 
@@ -181,6 +184,7 @@ printRouter.get('/jobs/:id/output/:side', async (req, res) => {
   const j = await getJob(parseId(req.params.id))
   if (!j) throw new HttpError(404, 'Trabalho não encontrado.')
   const side = req.params.side === 'verso' ? 'verso' : 'frente'
+  if (j.instance_id && j.instance_id !== config.instanceId) throw new HttpError(404, 'O arquivo deste trabalho está em outro computador.')
   const dir = j.output_path ?? path.join(config.printOutputDir, `job-${String(j.id).padStart(6, '0')}`)
   const file = path.join(dir, `${side}.png`)
   if (!fs.existsSync(file)) throw new HttpError(404, 'Arquivo de saída não disponível para este trabalho.')
@@ -236,8 +240,8 @@ printRouter.post('/calibration', async (req, res) => {
   const cost = computeCardCost(await getActiveCostParams(), { sides: 1, quantity: 1 })
   const db = await getDb()
   const inserted = await db.get<{ id: number }>(
-    `INSERT INTO print_jobs (printer_id, printer_name, person_name, template_name, copies, sides, status, cost_json, unit_cost, total_cost) VALUES (?, ?, 'Cartão de teste', 'Calibração', 1, 1, 'printing', ?, ?, ?) RETURNING id`,
-    [printer.id, printer.name, JSON.stringify(cost), cost.unitCost, cost.totalCost],
+    `INSERT INTO print_jobs (printer_id, printer_name, person_name, template_name, copies, sides, status, cost_json, unit_cost, total_cost, instance_id) VALUES (?, ?, 'Cartão de teste', 'Calibração', 1, 1, 'printing', ?, ?, ?, ?) RETURNING id`,
+    [printer.id, printer.name, JSON.stringify(cost), cost.unitCost, cost.totalCost, config.instanceId],
   )
   const jobId = inserted!.id
   const result = await runJob(jobId, printer, { frontPng: png, backPng: null, orientation: body.orientation, copies: 1, jobName: `Impress-o #${jobId} teste` })

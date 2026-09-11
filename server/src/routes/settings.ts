@@ -32,6 +32,7 @@ settingsRouter.get('/', async (_req, res) => {
     settings: { ...DEFAULTS, ...(await getJsonSetting<Partial<AppSettings>>('app_settings', {})) },
     paths: { dataDir: config.dataDir, dbPath: config.dbPath, uploadsDir: config.uploadsDir, printOutputDir: config.printOutputDir },
     database,
+    instance: { id: config.instanceId, name: config.instanceName },
     platform: process.platform,
     nodeVersion: process.version,
     counts,

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { getDb, nowIso } from '../lib/db.js'
+import { config } from '../lib/config.js'
 import { HttpError, parseId, validate } from '../lib/http.js'
 import { getAdapter, listSystemPrinters, checkNetwork, type PrinterConfig, type PrinterOptions } from '../printer/index.js'
 
@@ -17,6 +18,7 @@ interface PrinterRow {
   duplex: number
   is_default: number
   options_json: string
+  instance_id: string | null
   created_at: string
   updated_at: string
 }
@@ -39,6 +41,7 @@ export function rowToConfig(r: PrinterRow): PrinterConfig {
     duplex: Number(r.duplex) === 1,
     isDefault: Number(r.is_default) === 1,
     options,
+    instanceId: r.instance_id,
   }
 }
 
@@ -48,9 +51,10 @@ export async function getPrinter(id: number): Promise<PrinterConfig | null> {
   return r ? rowToConfig(r) : null
 }
 
+/** Impressora padrão DESTA instalação (o banco pode ser compartilhado por várias máquinas). */
 export async function getDefaultPrinter(): Promise<PrinterConfig | null> {
   const db = await getDb()
-  const r = await db.get<PrinterRow>('SELECT * FROM printers ORDER BY is_default DESC, id ASC LIMIT 1')
+  const r = await db.get<PrinterRow>('SELECT * FROM printers WHERE instance_id = ? ORDER BY is_default DESC, id ASC LIMIT 1', [config.instanceId])
   return r ? rowToConfig(r) : null
 }
 
@@ -77,7 +81,7 @@ const printerSchema = z.object({
 
 printersRouter.get('/', async (_req, res) => {
   const db = await getDb()
-  const rows = await db.all<PrinterRow>('SELECT * FROM printers ORDER BY is_default DESC, lower(name)')
+  const rows = await db.all<PrinterRow>('SELECT * FROM printers WHERE instance_id = ? ORDER BY is_default DESC, lower(name)', [config.instanceId])
   res.json(rows.map(rowToConfig))
 })
 
@@ -94,12 +98,12 @@ printersRouter.post('/', async (req, res) => {
   }
   const db = await getDb()
   const id = await db.transaction(async (tx) => {
-    const count = Number((await tx.get<{ c: number }>('SELECT COUNT(*) AS c FROM printers'))!.c)
+    const count = Number((await tx.get<{ c: number }>('SELECT COUNT(*) AS c FROM printers WHERE instance_id = ?', [config.instanceId]))!.c)
     const isDefault = body.isDefault || count === 0
-    if (isDefault) await tx.run('UPDATE printers SET is_default = 0')
+    if (isDefault) await tx.run('UPDATE printers SET is_default = 0 WHERE instance_id = ?', [config.instanceId])
     const row = await tx.get<{ id: number }>(
-      'INSERT INTO printers (name, adapter, system_name, host, model, dpi, duplex, is_default, options_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
-      [body.name, body.adapter, body.systemName ?? null, body.host ?? null, body.model ?? 'Entrust Sigma DS', body.dpi ?? 300, body.duplex ? 1 : 0, isDefault ? 1 : 0, JSON.stringify(body.options ?? {})],
+      'INSERT INTO printers (name, adapter, system_name, host, model, dpi, duplex, is_default, options_json, instance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      [body.name, body.adapter, body.systemName ?? null, body.host ?? null, body.model ?? 'Entrust Sigma DS', body.dpi ?? 300, body.duplex ? 1 : 0, isDefault ? 1 : 0, JSON.stringify(body.options ?? {}), config.instanceId],
     )
     return row!.id
   })
@@ -118,7 +122,7 @@ printersRouter.put('/:id', async (req, res) => {
   }
   const db = await getDb()
   await db.transaction(async (tx) => {
-    if (body.isDefault) await tx.run('UPDATE printers SET is_default = 0')
+    if (body.isDefault) await tx.run('UPDATE printers SET is_default = 0 WHERE instance_id = ?', [config.instanceId])
     await tx.run(
       'UPDATE printers SET name = ?, adapter = ?, system_name = ?, host = ?, model = ?, dpi = ?, duplex = ?, is_default = ?, options_json = ?, updated_at = ? WHERE id = ?',
       [
@@ -146,10 +150,10 @@ printersRouter.delete('/:id', async (req, res) => {
   const db = await getDb()
   await db.transaction(async (tx) => {
     await tx.run('DELETE FROM printers WHERE id = ?', [id])
-    const defaults = Number((await tx.get<{ c: number }>('SELECT COUNT(*) AS c FROM printers WHERE is_default = 1'))!.c)
+    const defaults = Number((await tx.get<{ c: number }>('SELECT COUNT(*) AS c FROM printers WHERE is_default = 1 AND instance_id = ?', [config.instanceId]))!.c)
     if (defaults !== 1) {
-      const remaining = await tx.get<{ id: number }>('SELECT id FROM printers ORDER BY is_default DESC, id ASC LIMIT 1')
-      await tx.run('UPDATE printers SET is_default = 0')
+      const remaining = await tx.get<{ id: number }>('SELECT id FROM printers WHERE instance_id = ? ORDER BY is_default DESC, id ASC LIMIT 1', [config.instanceId])
+      await tx.run('UPDATE printers SET is_default = 0 WHERE instance_id = ?', [config.instanceId])
       if (remaining) await tx.run('UPDATE printers SET is_default = 1 WHERE id = ?', [remaining.id])
     }
   })

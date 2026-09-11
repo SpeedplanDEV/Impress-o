@@ -77,7 +77,15 @@ Observações:
 
 - A impressora continua sendo acessada pelo computador onde o `npm start` roda (é ele que fala com o
   driver Entrust). O banco na nuvem só guarda os dados; vários computadores podem apontar para o mesmo
-  banco e imprimir cada um na sua Sigma DS.
+  banco e imprimir cada um na sua Sigma DS. **Cada computador cadastra a sua impressora** (a lista de
+  impressoras e a impressora padrão são por máquina); pessoas, empresas, modelos e histórico são
+  compartilhados.
+- No Supabase as tabelas são criadas no esquema privado `impresso` (não no `public`) e com *Row Level
+  Security* ativo, de modo que a API de dados do Supabase (a chave `anon` que aparece no painel) **não**
+  consegue ler nem alterar fotos, pessoas ou senhas. Mesmo assim, não exponha o esquema `impresso` na
+  API de dados e não compartilhe a *connection string*.
+- Conexões: o sistema usa poucas conexões (3 por máquina, ajustável com `IMPRESSO_DB_POOL_MAX`) porque o
+  pooler gratuito do Supabase limita o total; use o modo *Session pooler*.
 - Ao trocar de SQLite para Postgres, os arquivos que estavam em `data/uploads` são importados para o
   banco automaticamente na primeira inicialização (os cadastros em si não são migrados: o banco novo
   começa vazio).

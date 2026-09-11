@@ -98,6 +98,25 @@ afterAll(async () => {
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
+describe('esquema do banco', () => {
+  it('no Postgres, as tabelas ficam no esquema privado "impresso" com RLS ativo', async () => {
+    if (!databaseUrl) return
+    const { getDb, APP_TABLES, PG_SCHEMA } = await import('../src/lib/db.js')
+    const db = await getDb()
+    const rows = await db.all<{ relname: string; nspname: string; relrowsecurity: boolean }>(
+      `SELECT c.relname, n.nspname, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND n.nspname IN ('public', ?)`,
+      [PG_SCHEMA],
+    )
+    for (const t of APP_TABLES) {
+      const r = rows.find((x) => x.relname === t)
+      expect(r, `tabela ${t}`).toBeTruthy()
+      expect(r!.nspname).toBe(PG_SCHEMA)
+      expect(r!.relrowsecurity).toBe(true)
+    }
+    expect(rows.filter((r) => r.nspname === 'public')).toHaveLength(0)
+  })
+})
+
 describe('autenticação de usuário único', () => {
   it('começa sem configuração e bloqueia a API', async () => {
     const s = await call('GET', '/api/auth/status')

@@ -55,7 +55,7 @@ export default function SettingsPage({ onAccountChanged }: { onAccountChanged: (
           </div>
         </div>
         <p className="small muted" style={{ marginTop: 6 }}>
-          A Sigma DS é usada pelo <strong>driver oficial Entrust (XPS Card Printer Driver)</strong> instalado no Windows (ou driver Linux). Instale o driver, conecte a impressora por USB ou rede, e selecione a fila abaixo. O sistema envia a imagem do cartão em 300 dpi (1013 × 638 px) no tamanho CR80, sem margens.
+          A Sigma DS é usada pelo <strong>driver oficial Entrust (XPS Card Printer Driver)</strong> instalado no Windows (ou driver Linux). Instale o driver, conecte a impressora por USB ou rede, e selecione a fila abaixo. O sistema envia a imagem do cartão em 300 dpi (1013 × 638 px) no tamanho CR80, sem margens. As impressoras são cadastradas por computador: com o banco na nuvem, cada máquina vê e usa só as suas.
         </p>
         {printers.data?.length === 0 && <div className="empty">Nenhuma impressora cadastrada. Adicione a Sigma DS ou uma impressora simulada para testes.</div>}
         {testMsg && <div className="alert info small">{testMsg} <a href="/api/print/calibration.png" target="_blank" rel="noreferrer">Ver o cartão de teste</a></div>}
@@ -104,6 +104,7 @@ export default function SettingsPage({ onAccountChanged }: { onAccountChanged: (
               {info.data.database.kind === 'postgres' ? <span className="badge ok">Postgres na nuvem</span> : <span className="badge">SQLite local</span>}{' '}
               <span className="mono">{info.data.database.target}</span>
             </dd>
+            <dt>Este computador</dt><dd>{info.data.instance.name} <span className="mono small muted">({info.data.instance.id.slice(0, 8)})</span></dd>
             <dt>Pasta de dados</dt><dd className="mono">{info.data.paths.dataDir}</dd>
             <dt>Saída de impressão</dt><dd className="mono">{info.data.paths.printOutputDir}</dd>
           </dl>

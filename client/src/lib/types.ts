@@ -132,6 +132,7 @@ export interface PrintJob {
   unitCost: number | null
   totalCost: number | null
   outputPath: string | null
+  thisMachine?: boolean
   createdAt: string
   finishedAt: string | null
 }
@@ -154,6 +155,7 @@ export interface AppInfo {
   settings: { organizationName: string; extraFields: string[] }
   paths: { dataDir: string; dbPath: string; uploadsDir: string; printOutputDir: string }
   database: { kind: 'sqlite' | 'postgres' | 'pglite'; target: string }
+  instance: { id: string; name: string }
   platform: string
   nodeVersion: string
   counts: { companies: number; departments: number; persons: number; templates: number; printers: number; jobs: number; jobsDone: number; cardsPrinted: number; totalCost: number }

@@ -9,7 +9,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getDb } from './db.js'
+import { getDb, type Db } from './db.js'
 import { config } from './config.js'
 import { HttpError } from './http.js'
 
@@ -156,12 +156,12 @@ export function assetUrl(id: number | null | undefined): string | null {
  * Importa para o banco os arquivos que versões anteriores gravaram em
  * data/uploads (registros sem `data`). Roda uma vez na inicialização.
  */
-export async function importarUploadsAntigos(): Promise<number> {
-  const db = await getDb()
+export async function importarUploadsAntigos(dbIn?: Db, uploadsDir: string = config.uploadsDir): Promise<number> {
+  const db = dbIn ?? (await getDb())
   const pendentes = await db.all<{ id: number; file_name: string }>('SELECT id, file_name FROM assets WHERE data IS NULL')
   let importados = 0
   for (const a of pendentes) {
-    const p = path.join(config.uploadsDir, a.file_name)
+    const p = path.join(uploadsDir, a.file_name)
     if (!fs.existsSync(p)) continue
     await db.run('UPDATE assets SET data = ? WHERE id = ?', [fs.readFileSync(p), a.id])
     importados++

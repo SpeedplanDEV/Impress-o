@@ -1,5 +1,7 @@
 import path from 'node:path'
 import os from 'node:os'
+import fs from 'node:fs'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -12,9 +14,34 @@ const dataDir = process.env.IMPRESSO_DATA_DIR
   ? path.resolve(process.env.IMPRESSO_DATA_DIR)
   : path.join(repoRoot, 'data')
 
+/**
+ * Identificador estável desta instalação (arquivo data/instance-id). Quando o
+ * banco é compartilhado por várias máquinas (Postgres na nuvem), impressoras e
+ * trabalhos em andamento são separados por instância.
+ */
+function loadInstanceId(): string {
+  const file = path.join(dataDir, 'instance-id')
+  try {
+    const existing = fs.readFileSync(file, 'utf8').trim()
+    if (/^[\w-]{8,64}$/.test(existing)) return existing
+  } catch {
+    /* ainda não existe */
+  }
+  const id = crypto.randomUUID()
+  try {
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(file, id + '\n', 'utf8')
+  } catch {
+    /* sem disco gravável: id só desta execução */
+  }
+  return id
+}
+
 export const config = {
   repoRoot,
   dataDir,
+  instanceId: process.env.IMPRESSO_INSTANCE_ID?.trim() || loadInstanceId(),
+  instanceName: os.hostname(),
   /** postgres://... (Supabase, Neon...) para usar um banco na nuvem; vazio = SQLite local. */
   databaseUrl: process.env.DATABASE_URL?.trim() || null,
   dbPath: process.env.IMPRESSO_DB_PATH ? path.resolve(process.env.IMPRESSO_DB_PATH) : path.join(dataDir, 'impress-o.sqlite'),

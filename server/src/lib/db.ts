@@ -11,6 +11,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { config } from './config.js'
 
 export type Param = string | number | null | boolean | Buffer | Uint8Array
@@ -116,7 +117,6 @@ const MIGRATIONS: { version: number; sql: string }[] = [
         height     INTEGER,
         size_bytes INTEGER NOT NULL,
         sha256     TEXT NOT NULL,
-        data       {{BLOB}},
         created_at TEXT NOT NULL DEFAULT {{NOW}}
       );
 
@@ -204,6 +204,26 @@ const MIGRATIONS: { version: number; sql: string }[] = [
   },
 ]
 
+/** Colunas acrescentadas depois da versão 1 (idempotente: só cria se faltar). */
+const COLUMN_MIGRATIONS: { version: number; columns: { table: string; column: string; type: string }[] }[] = [
+  {
+    version: 2,
+    columns: [
+      // Fotos e logos passam a ficar no banco
+      { table: 'assets', column: 'data', type: '{{BLOB}}' },
+      // Banco compartilhado por várias máquinas: impressoras e trabalhos por instalação
+      { table: 'printers', column: 'instance_id', type: 'TEXT' },
+      { table: 'print_jobs', column: 'instance_id', type: 'TEXT' },
+    ],
+  },
+]
+
+/** Tabelas da aplicação (para RLS no Postgres). */
+export const APP_TABLES = ['schema_version', 'settings', 'user_account', 'sessions', 'companies', 'departments', 'assets', 'templates', 'persons', 'printers', 'print_jobs', 'cost_profiles']
+
+/** Esquema privado no Postgres: não é exposto pela API de dados do Supabase (PostgREST expõe só `public`). */
+export const PG_SCHEMA = 'impresso'
+
 const DIALECT_TOKENS: Record<Db['dialect'], Record<string, string>> = {
   sqlite: {
     '{{ID}}': 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -225,7 +245,20 @@ function renderDdl(sql: string, dialect: Db['dialect']): string {
   return out
 }
 
+async function hasColumn(db: Db, table: string, column: string): Promise<boolean> {
+  if (db.dialect === 'sqlite') {
+    const cols = await db.all<{ name: string }>(`PRAGMA table_info(${table})`)
+    return cols.some((c) => c.name === column)
+  }
+  const row = await db.get<{ ok: number }>(
+    'SELECT 1 AS ok FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = ?',
+    [PG_SCHEMA, table, column],
+  )
+  return !!row
+}
+
 async function migrate(db: Db): Promise<void> {
+  if (db.dialect === 'postgres') await db.exec(`CREATE SCHEMA IF NOT EXISTS ${PG_SCHEMA}`)
   await db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)')
   const row = await db.get<{ v: number | null }>('SELECT MAX(version) AS v FROM schema_version')
   const current = Number(row?.v ?? 0)
@@ -235,6 +268,23 @@ async function migrate(db: Db): Promise<void> {
       await tx.exec(renderDdl(m.sql, db.dialect))
       await tx.run('INSERT INTO schema_version (version) VALUES (?)', [m.version])
     })
+  }
+  for (const m of COLUMN_MIGRATIONS) {
+    if (m.version <= current) continue
+    await db.transaction(async (tx) => {
+      for (const c of m.columns) {
+        if (!(await hasColumn(tx, c.table, c.column))) {
+          await tx.exec(`ALTER TABLE ${c.table} ADD COLUMN ${c.column} ${renderDdl(c.type, db.dialect)}`)
+        }
+      }
+      await tx.run('INSERT INTO schema_version (version) VALUES (?)', [m.version])
+    })
+  }
+  if (db.dialect === 'postgres') {
+    // Belt and braces além do esquema privado: mesmo que alguém exponha o esquema,
+    // papéis sem política (anon/authenticated do Supabase) não leem nem gravam.
+    // O dono das tabelas (a conexão da aplicação) não é afetado pelo RLS.
+    for (const t of APP_TABLES) await db.exec(`ALTER TABLE ${PG_SCHEMA}.${t} ENABLE ROW LEVEL SECURITY`)
   }
 }
 
@@ -287,6 +337,9 @@ class SqliteTxDb implements Db {
  * na mesma conexão e ficar "dentro" daquela transação. Por isso a transação
  * segura um bloqueio, e todas as demais operações esperam ele liberar.
  */
+/** Contexto assíncrono da transação SQLite em andamento (evita deadlock se um helper usar getDb() dentro dela). */
+const sqliteTxContext = new AsyncLocalStorage<SqliteTxDb>()
+
 class SqliteDb implements Db {
   readonly dialect = 'sqlite' as const
   private conn: import('node:sqlite').DatabaseSync
@@ -310,6 +363,8 @@ class SqliteDb implements Db {
   }
 
   async get<T = Row>(sql: string, params: Param[] = []): Promise<T | undefined> {
+    const tx = sqliteTxContext.getStore()
+    if (tx) return tx.get<T>(sql, params)
     const release = await this.acquire()
     try {
       return await this.inner.get<T>(sql, params)
@@ -319,6 +374,8 @@ class SqliteDb implements Db {
   }
 
   async all<T = Row>(sql: string, params: Param[] = []): Promise<T[]> {
+    const tx = sqliteTxContext.getStore()
+    if (tx) return tx.all<T>(sql, params)
     const release = await this.acquire()
     try {
       return await this.inner.all<T>(sql, params)
@@ -328,6 +385,8 @@ class SqliteDb implements Db {
   }
 
   async run(sql: string, params: Param[] = []): Promise<{ changes: number }> {
+    const tx = sqliteTxContext.getStore()
+    if (tx) return tx.run(sql, params)
     const release = await this.acquire()
     try {
       return await this.inner.run(sql, params)
@@ -337,6 +396,8 @@ class SqliteDb implements Db {
   }
 
   async exec(sql: string): Promise<void> {
+    const tx = sqliteTxContext.getStore()
+    if (tx) return tx.exec(sql)
     const release = await this.acquire()
     try {
       await this.inner.exec(sql)
@@ -346,11 +407,13 @@ class SqliteDb implements Db {
   }
 
   async transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
+    const current = sqliteTxContext.getStore()
+    if (current) return fn(current)
     const release = await this.acquire()
     try {
       this.conn.exec('BEGIN')
       try {
-        const result = await fn(this.inner)
+        const result = await sqliteTxContext.run(this.inner, () => fn(this.inner))
         this.conn.exec('COMMIT')
         return result
       } catch (err) {
@@ -409,24 +472,46 @@ interface PgLikeQueryable {
   exec(sql: string): Promise<void>
 }
 
+/** Erros de conexão que valem uma nova tentativa (só em leituras, fora de transação). */
+const RETRYABLE_CODES = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT', 'ECONNREFUSED', '57P01', '08006', '08003', '08001'])
+function isConnectionError(err: unknown): boolean {
+  const e = err as { code?: string; message?: string }
+  return RETRYABLE_CODES.has(e?.code ?? '') || /connection terminated|terminating connection/i.test(e?.message ?? '')
+}
+
 class PgBaseDb implements Db {
   readonly dialect = 'postgres' as const
   protected q: PgLikeQueryable
   private txRunner: (<T>(fn: (tx: Db) => Promise<T>) => Promise<T>) | null
+  private retryReads: boolean
 
-  constructor(q: PgLikeQueryable, txRunner: (<T>(fn: (tx: Db) => Promise<T>) => Promise<T>) | null) {
+  constructor(q: PgLikeQueryable, txRunner: (<T>(fn: (tx: Db) => Promise<T>) => Promise<T>) | null, opts: { retryReads?: boolean } = {}) {
     this.q = q
     this.txRunner = txRunner
+    this.retryReads = !!opts.retryReads
+  }
+
+  private async read(sql: string, params: Param[]): Promise<Row[]> {
+    try {
+      return (await this.q.query(toPgPlaceholders(sql), normalizeParams(params))).rows
+    } catch (err) {
+      // Uma conexão ociosa derrubada pela rede só é descoberta na próxima consulta:
+      // repete uma vez (leitura é idempotente) em vez de devolver erro ao usuário.
+      if (this.retryReads && isConnectionError(err)) {
+        return (await this.q.query(toPgPlaceholders(sql), normalizeParams(params))).rows
+      }
+      throw err
+    }
   }
 
   async get<T = Row>(sql: string, params: Param[] = []): Promise<T | undefined> {
-    const res = await this.q.query(toPgPlaceholders(sql), normalizeParams(params))
-    return normalizeRow<T>(res.rows[0])
+    const rows = await this.read(sql, params)
+    return normalizeRow<T>(rows[0])
   }
 
   async all<T = Row>(sql: string, params: Param[] = []): Promise<T[]> {
-    const res = await this.q.query(toPgPlaceholders(sql), normalizeParams(params))
-    return res.rows.map((r) => normalizeRow<T>(r) as T)
+    const rows = await this.read(sql, params)
+    return rows.map((r) => normalizeRow<T>(r) as T)
   }
 
   async run(sql: string, params: Param[] = []): Promise<{ changes: number }> {
@@ -476,8 +561,24 @@ async function openPostgres(url: string): Promise<Db> {
   pg.types.setTypeParser(20, (v: string) => Number(v))
   pg.types.setTypeParser(1700, (v: string) => Number(v))
   const { connectionString, ssl } = prepareDatabaseUrl(url)
-  const pool = new pg.Pool({ connectionString, max: 5, ssl, connectionTimeoutMillis: 15000 })
+  // Ajustes para banco remoto: poucas conexões (o pooler gratuito do Supabase
+  // limita ~15 por banco), conexões ociosas mantidas por alguns minutos com
+  // keepalive (evita handshake TLS a cada requisição) e tempo máximo por consulta.
+  const pool = new pg.Pool({
+    connectionString,
+    ssl,
+    max: Math.max(1, Number(process.env.IMPRESSO_DB_POOL_MAX ?? 3) || 3),
+    connectionTimeoutMillis: 15000,
+    idleTimeoutMillis: 5 * 60_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    query_timeout: 30_000,
+  })
   pool.on('error', (err) => console.error('[db] erro no pool Postgres:', err.message))
+  // Toda conexão nova trabalha no esquema privado da aplicação
+  pool.on('connect', (client) => {
+    client.query(`SET search_path TO ${PG_SCHEMA}, public`).catch((err: Error) => console.error('[db] search_path:', err.message))
+  })
   // Sem parâmetros o pg usa o protocolo simples, que aceita várias instruções.
   const wrap = (c: { query: (sql: string, params?: unknown[]) => Promise<{ rows: Row[]; rowCount: number | null }> }): PgLikeQueryable => ({
     query: (sql, params) => c.query(sql, params),
@@ -503,7 +604,7 @@ async function openPostgres(url: string): Promise<Db> {
       client.release()
     }
   }
-  const db = new PgBaseDb(wrap(pool), txRunner)
+  const db = new PgBaseDb(wrap(pool), txRunner, { retryReads: true })
   db.close = async () => {
     await pool.end()
   }
@@ -516,6 +617,7 @@ async function openPglite(): Promise<Db> {
   const { PGlite } = await import('@electric-sql/pglite')
   const lite = new PGlite()
   await lite.waitReady
+  await lite.exec(`CREATE SCHEMA IF NOT EXISTS ${PG_SCHEMA}; SET search_path TO ${PG_SCHEMA}, public`)
   const parsers = { 20: (v: string) => Number(v), 1700: (v: string) => Number(v) }
   const q: PgLikeQueryable = {
     query: async (sql, params) => {
@@ -565,6 +667,13 @@ export function describeDatabase(): { kind: 'sqlite' | 'postgres' | 'pglite'; ta
   }
   if (url === 'pglite://memory') return { kind: 'pglite', target: 'memória' }
   return { kind: 'sqlite', target: config.dbPath }
+}
+
+/** Abre um arquivo SQLite qualquer e aplica as migrações (usado nos testes de migração). */
+export async function openSqliteFile(file: string): Promise<Db> {
+  const db = await openSqlite(file)
+  await migrate(db)
+  return db
 }
 
 /** Abre (uma vez) o banco configurado e aplica as migrações. */

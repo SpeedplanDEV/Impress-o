@@ -19,7 +19,6 @@
     "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p server/tsconfig.test.json --noEmit && tsc -p client/tsconfig.json --noEmit"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "fabric": "^7.4.0",
     "pdf-lib": "^1.17.1",

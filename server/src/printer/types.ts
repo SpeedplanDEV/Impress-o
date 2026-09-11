@@ -23,6 +23,8 @@ export interface PrinterConfig {
   duplex: boolean
   isDefault: boolean
   options: PrinterOptions
+  /** Instalação (máquina) dona desta impressora, quando o banco é compartilhado. */
+  instanceId?: string | null
 }
 
 export interface PrinterOptions {

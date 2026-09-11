@@ -22,7 +22,11 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
   (`node:sqlite`, padrão) ou **Postgres** via `DATABASE_URL` (Supabase/Neon gratuitos, driver `pg`).
   O SQL é comum aos dois (placeholders `?` convertidos em `$n`, `RETURNING id`, datas em texto UTC);
   o DDL usa marcadores de dialeto. Fotos e logos ficam como BLOB/BYTEA na tabela `assets`.
-  Os testes de API rodam nos dois dialetos (SQLite e PGlite, Postgres em WASM).
+  Os testes de API rodam nos dois dialetos (SQLite e PGlite, Postgres em WASM). Migrações
+  incrementais: v1 (tabelas) e v2 (colunas `assets.data`, `printers.instance_id`,
+  `print_jobs.instance_id`), aplicadas de forma idempotente a bancos já existentes.
+  Com banco compartilhado, impressoras e trabalhos em andamento são separados por instalação
+  (`data/instance-id`).
 
 ## Módulos
 
@@ -100,5 +104,9 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
 
 ## Dados pessoais (LGPD)
 
-Fotos e dados ficam apenas na máquina local (`data/`). Excluir uma pessoa remove o vínculo; o
-arquivo de foto pode ser removido pela API de assets. Faça backup e controle de acesso ao computador.
+No modo padrão, fotos e dados ficam apenas na máquina local (`data/`). Com `DATABASE_URL`, ficam no
+Postgres do provedor escolhido (Supabase/Neon): nesse caso o titular dos dados é o operador do
+sistema e vale o contrato do provedor (região São Paulo disponível nos dois). As tabelas ficam no
+esquema privado `impresso` com RLS ativo, fora do alcance da API pública do Supabase. Excluir uma
+pessoa remove o vínculo; a foto pode ser removida pela API de assets. Controle o acesso à
+*connection string* como a uma senha.

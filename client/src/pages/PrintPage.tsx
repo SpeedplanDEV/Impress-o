@@ -296,7 +296,7 @@ export function JobsTable({ jobs, onDelete }: { jobs: PrintJob[]; onDelete?: (id
             </td>
             <td className="num">
               <div className="btn-group">
-                {j.outputPath && <a className="btn small" href={printApi.outputUrl(j.id, 'frente')} target="_blank" rel="noreferrer">Ver</a>}
+                {j.outputPath && j.thisMachine !== false && <a className="btn small" href={printApi.outputUrl(j.id, 'frente')} target="_blank" rel="noreferrer">Ver</a>}
                 {onDelete && <button className="btn small ghost" onClick={() => void onDelete(j.id)}>✕</button>}
               </div>
             </td>
