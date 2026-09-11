@@ -50,9 +50,31 @@ export default function TemplateEditorPage() {
         e.preventDefault()
       }
     }
+    // Navegação interna (links do menu / "← Modelos") pede confirmação quando há alterações não salvas
+    const onClick = (e: MouseEvent) => {
+      if (!dirty) return
+      const a = (e.target as HTMLElement | null)?.closest('a[href]') as HTMLAnchorElement | null
+      if (!a || a.hasAttribute('download') || a.target === '_blank') return
+      if (!confirm('Há alterações não salvas neste modelo. Sair sem salvar?')) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
     window.addEventListener('beforeunload', h)
-    return () => window.removeEventListener('beforeunload', h)
+    document.addEventListener('click', onClick, true)
+    return () => {
+      window.removeEventListener('beforeunload', h)
+      document.removeEventListener('click', onClick, true)
+    }
   }, [dirty])
+
+  function exportJson() {
+    const d = docRef.current
+    if (!d) return
+    const out = { ...d, name, meta: { ...(d.meta ?? {}), exportedAt: new Date().toISOString(), app: 'Impress-o' } }
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' })
+    downloadBlob(blob, `${(name || 'modelo').replace(/[^\w\-]+/g, '_').slice(0, 60)}.impresso.json`)
+  }
 
   async function save() {
     const d = docRef.current
@@ -92,7 +114,7 @@ export default function TemplateEditorPage() {
           {dirty && <span className="badge warn">alterações não salvas</span>}
         </div>
         <div className="btn-group">
-          <a className="btn" href={templatesApi.exportUrl(templateId)} download>Exportar .json</a>
+          <button className="btn" onClick={exportJson}>Exportar .json</button>
           <button className="btn" onClick={() => void exportPng()}>Exportar PNG (exemplo)</button>
           <button className="btn primary" onClick={() => void save()} disabled={saving}>{saving ? 'Salvando…' : 'Salvar modelo'}</button>
         </div>

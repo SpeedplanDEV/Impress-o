@@ -83,6 +83,7 @@ export interface PrinterOptions {
   cupsMedia?: string
   cupsExtra?: string
   rotate180?: boolean
+  duplexShortEdge?: boolean
   keepOutput?: boolean
 }
 
@@ -144,9 +145,9 @@ export interface PrintResult {
 }
 
 export interface CostSummary {
-  totals: { jobs: number; cards: number; total_cost: number }
-  byMonth: { month: string; jobs: number; cards: number; total_cost: number }[]
-  byCompany: { company: string; jobs: number; cards: number; total_cost: number }[]
+  totals: { jobs: number; cards: number; totalCost: number }
+  byMonth: { month: string; jobs: number; cards: number; totalCost: number }[]
+  byCompany: { company: string; jobs: number; cards: number; totalCost: number }[]
 }
 
 export interface AppInfo {

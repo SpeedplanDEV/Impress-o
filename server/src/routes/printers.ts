@@ -57,6 +57,7 @@ const optionsSchema = z.object({
   cupsMedia: z.string().max(100).optional(),
   cupsExtra: z.string().max(500).optional(),
   rotate180: z.boolean().optional(),
+  duplexShortEdge: z.boolean().optional(),
   keepOutput: z.boolean().optional(),
 })
 
@@ -104,8 +105,12 @@ printersRouter.put('/:id', (req, res) => {
   if (!existing) throw new HttpError(404, 'Impressora não encontrada.')
   const body = validate(printerSchema.partial(), req.body)
   const db = getDb()
-  if (body.isDefault) db.prepare('UPDATE printers SET is_default = 0').run()
   const pick = <T>(v: T | undefined, f: T): T => (v === undefined ? f : v)
+  const nextAdapter = body.adapter ?? existing.adapter
+  if (nextAdapter === 'system' && !pick(body.systemName, existing.systemName) && !pick(body.host, existing.host)) {
+    throw new HttpError(400, 'Informe o nome da fila no sistema (ou o endereço de rede) da impressora.')
+  }
+  if (body.isDefault) db.prepare('UPDATE printers SET is_default = 0').run()
   db.prepare(
     `UPDATE printers SET name = ?, adapter = ?, system_name = ?, host = ?, model = ?, dpi = ?, duplex = ?, is_default = ?, options_json = ?, updated_at = datetime('now') WHERE id = ?`,
   ).run(
@@ -125,10 +130,23 @@ printersRouter.put('/:id', (req, res) => {
 
 printersRouter.delete('/:id', (req, res) => {
   const id = parseId(req.params.id)
-  if (!getPrinter(id)) throw new HttpError(404, 'Impressora não encontrada.')
-  getDb().prepare('DELETE FROM printers WHERE id = ?').run(id)
-  const remaining = getDb().prepare('SELECT id FROM printers ORDER BY id LIMIT 1').get() as unknown as { id: number } | undefined
-  if (remaining) getDb().prepare('UPDATE printers SET is_default = 1 WHERE id = ?').run(remaining.id)
+  const existing = getPrinter(id)
+  if (!existing) throw new HttpError(404, 'Impressora não encontrada.')
+  const db = getDb()
+  db.exec('BEGIN')
+  try {
+    db.prepare('DELETE FROM printers WHERE id = ?').run(id)
+    const defaults = (db.prepare('SELECT COUNT(*) AS c FROM printers WHERE is_default = 1').get() as unknown as { c: number }).c
+    if (defaults !== 1) {
+      const remaining = db.prepare('SELECT id FROM printers ORDER BY is_default DESC, id ASC LIMIT 1').get() as unknown as { id: number } | undefined
+      db.prepare('UPDATE printers SET is_default = 0').run()
+      if (remaining) db.prepare('UPDATE printers SET is_default = 1 WHERE id = ?').run(remaining.id)
+    }
+    db.exec('COMMIT')
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
   res.json({ ok: true })
 })
 

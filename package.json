@@ -9,14 +9,14 @@
   },
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "tsx watch server/src/index.ts",
+    "dev:server": "tsx watch --disable-warning=ExperimentalWarning server/src/index.ts",
     "dev:client": "vite",
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc -p server/tsconfig.json",
     "build:client": "vite build",
-    "start": "node --no-warnings=ExperimentalWarning dist/server/src/index.js",
+    "start": "node --disable-warning=ExperimentalWarning dist/server/src/index.js",
     "test": "vitest run",
-    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p client/tsconfig.json --noEmit"
+    "typecheck": "tsc -p server/tsconfig.json --noEmit && tsc -p server/tsconfig.test.json --noEmit && tsc -p client/tsconfig.json --noEmit"
   },
   "dependencies": {
     "express": "^5.2.1",

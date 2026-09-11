@@ -29,7 +29,7 @@ function png(width, height, rgb = [200, 80, 80]) {
 const photoFile = path.join(dataDir, 'foto.png'); fs.writeFileSync(photoFile, png(300, 400, [90, 140, 200]))
 const logoFile = path.join(dataDir, 'logo.png'); fs.writeFileSync(logoFile, png(400, 120, [30, 120, 60]))
 
-const server = spawn('node', ['--no-warnings=ExperimentalWarning', 'dist/server/src/index.js'], { cwd: REPO, env: { ...process.env, PORT: String(PORT), IMPRESSO_DATA_DIR: dataDir }, stdio: ['ignore', 'pipe', 'pipe'] })
+const server = spawn('node', ['--disable-warning=ExperimentalWarning', 'dist/server/src/index.js'], { cwd: REPO, env: { ...process.env, PORT: String(PORT), IMPRESSO_DATA_DIR: dataDir }, stdio: ['ignore', 'pipe', 'pipe'] })
 let serverLog = ''
 server.stdout.on('data', (d) => { serverLog += d })
 server.stderr.on('data', (d) => { serverLog += d })
@@ -100,7 +100,7 @@ try {
   ok('modelo salvo com miniatura', true)
   await page.screenshot({ path: path.join(shots, '04-editor.png') })
   // Exporta JSON e reimporta
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('a:has-text("Exportar .json")')])
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Exportar .json")')])
   const exported = await dl.path()
   const exportedJson = JSON.parse(fs.readFileSync(exported, 'utf8'))
   ok('exportação .json do modelo', exportedJson.format === 'impress-o/template' && exportedJson.front?.fabric?.objects?.length > 5)

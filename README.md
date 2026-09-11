@@ -41,10 +41,12 @@ npm start
 Abra <http://localhost:3070>. Na primeira vez, defina seu nome e senha. Para desenvolvimento:
 `npm run dev` (servidor em 3070 + Vite em <http://localhost:5173>).
 
-Testes: `npm test` (modelo de custo, CSV e API). Verificação de tipos: `npm run typecheck`.
+Testes: `npm test` (modelo de custo, CSV, validação de modelo, PNG/PDF e API). Verificação de tipos:
+`npm run typecheck`. Teste ponta a ponta em navegador real: veja `e2e/README.md`.
 
 Variáveis opcionais: `PORT` (padrão 3070), `HOST` (padrão 127.0.0.1), `IMPRESSO_DATA_DIR`
-(pasta de dados; padrão `./data`).
+(pasta de dados; padrão `./data`), `IMPRESSO_DB_PATH` (arquivo do banco) e `IMPRESSO_ALLOWED_HOSTS`
+(hosts extras aceitos, separados por vírgula, se for acessar de outro nome/IP além de localhost).
 
 ## Fluxo recomendado
 
@@ -76,8 +78,11 @@ a resolução nativa da Sigma DS) e envia o PNG ao servidor local, que o entrega
   com `lp -d <fila> -o media=Custom.85.6x54mm -o print-scaling=none`.
 - **macOS**: a Entrust não oferece driver para Sigma DS; use a exportação em PDF/PNG.
 
-Opções por impressora: nome do tamanho de papel do driver, opções extras do CUPS, girar 180°,
-guardar os PNGs enviados (auditoria). Mantenha as *Preferências de impressão* do driver Entrust nos
+Opções por impressora: nome do tamanho de papel do driver (Windows), nome da mídia e opções extras do
+CUPS (Linux), girar 180°, verso pela borda curta (se o verso sair de cabeça para baixo) e guardar os
+PNGs enviados (auditoria). Modelos frente e verso exigem que a impressora esteja marcada como
+"Imprime frente e verso"; em impressoras só frente (DS1) o sistema recusa o trabalho em vez de gastar
+um segundo cartão com o verso. Mantenha as *Preferências de impressão* do driver Entrust nos
 padrões (tamanho do cartão, área de impressão, topcoat) — o sistema só envia a imagem no tamanho certo.
 
 > **Importante:** execute o `npm start` com o mesmo usuário do Windows que enxerga a impressora

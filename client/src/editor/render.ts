@@ -32,6 +32,8 @@ export interface RenderOptions {
   data?: CardData | null
   /** Mostra as bordas tracejadas dos espaços vazios (foto/logo) quando não há dado. */
   showPlaceholders?: boolean
+  /** Cancela carregamentos sobrepostos (editor). */
+  signal?: AbortSignal
 }
 
 async function loadImage(url: string): Promise<FabricImage> {
@@ -82,7 +84,8 @@ function fitImageToRect(img: FabricImage, rect: { left: number; top: number; wid
 export async function loadSideIntoCanvas(canvas: StaticCanvas, side: CardSideDesign, doc: Pick<CardTemplateDoc, 'width' | 'height'>, opts: RenderOptions = {}): Promise<string[]> {
   const warnings: string[] = []
   canvas.setDimensions({ width: doc.width, height: doc.height })
-  await canvas.loadFromJSON(side.fabric as object)
+  await canvas.loadFromJSON(side.fabric as object, undefined, { signal: opts.signal })
+  if (opts.signal?.aborted) return warnings
   if (!canvas.backgroundColor) canvas.backgroundColor = side.backgroundColor || '#ffffff'
   const data = opts.data ?? null
   if (!data) {
@@ -123,6 +126,7 @@ export async function loadSideIntoCanvas(canvas: StaticCanvas, side: CardSideDes
         canvas.remove(obj)
         canvas.insertAt(index, img)
       } catch {
+        if (!opts.showPlaceholders) canvas.remove(obj)
         warnings.push(role === 'photo' ? 'Não foi possível carregar a foto.' : 'Não foi possível carregar o logo.')
       }
       continue
@@ -145,6 +149,7 @@ export async function loadSideIntoCanvas(canvas: StaticCanvas, side: CardSideDes
         canvas.remove(obj)
         canvas.insertAt(index, img)
       } catch {
+        if (!opts.showPlaceholders) canvas.remove(obj)
         warnings.push('Não foi possível gerar o QR code.')
       }
     }

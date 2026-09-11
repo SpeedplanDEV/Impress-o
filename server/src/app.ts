@@ -6,9 +6,44 @@ import { requireAuth } from './lib/auth.js'
 import { authRouter } from './routes/auth.js'
 import { apiRouter } from './routes/index.js'
 
+/** Hosts aceitos (proteção contra DNS rebinding e requisições de outros sites). */
+function allowedHostnames(): Set<string> {
+  const set = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+  if (config.host && config.host !== '0.0.0.0' && config.host !== '::') set.add(config.host)
+  for (const h of (process.env.IMPRESSO_ALLOWED_HOSTS ?? '').split(',').map((x) => x.trim()).filter(Boolean)) set.add(h.toLowerCase())
+  return set
+}
+
+function hostnameOf(value: string | undefined): string | null {
+  if (!value) return null
+  try {
+    return new URL(/^[a-z]+:\/\//i.test(value) ? value : `http://${value}`).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
 export function createApp() {
   const app = express()
   app.disable('x-powered-by')
+
+  const allowed = allowedHostnames()
+  app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+    const host = hostnameOf(req.headers.host)
+    if (!host || !allowed.has(host)) {
+      res.status(421).json({ error: 'Host não permitido. Acesse pelo endereço local (localhost) ou configure IMPRESSO_ALLOWED_HOSTS.' })
+      return
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      const origin = hostnameOf(req.headers.origin) ?? hostnameOf(req.headers.referer)
+      const fetchSite = req.headers['sec-fetch-site']
+      if ((origin && !allowed.has(origin)) || fetchSite === 'cross-site') {
+        res.status(403).json({ error: 'Requisição de origem não permitida.' })
+        return
+      }
+    }
+    next()
+  })
   app.use(express.json({ limit: '40mb' }))
 
   // Rotas públicas (status, setup, login)

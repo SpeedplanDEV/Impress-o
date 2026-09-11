@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
@@ -35,7 +36,7 @@ export class SystemPrinterAdapter implements PrinterAdapter {
       return await this.printCups(config, job, frontPath, backPath)
     } finally {
       if (!config.options.keepOutput) {
-        for (const p of [frontPath, backPath]) {
+        for (const p of [frontPath, backPath, path.join(job.workDir, 'print.ps1')]) {
           if (p) {
             try {
               fs.unlinkSync(p)
@@ -50,7 +51,7 @@ export class SystemPrinterAdapter implements PrinterAdapter {
 
   private async printWindows(config: PrinterConfig, job: PrintJobRequest, frontPath: string, backPath: string | null): Promise<PrintResult> {
     const scriptPath = path.join(job.workDir, 'print.ps1')
-    fs.writeFileSync(scriptPath, WINDOWS_PRINT_SCRIPT, 'utf8')
+    fs.writeFileSync(scriptPath, '\uFEFF' + WINDOWS_PRINT_SCRIPT, 'utf8')
     const args = [
       '-NoProfile',
       '-NonInteractive',
@@ -70,19 +71,21 @@ export class SystemPrinterAdapter implements PrinterAdapter {
       job.orientation === 'landscape' ? '1' : '0',
       '-Duplex',
       backPath && config.duplex ? '1' : '0',
-      '-PaperName',
-      config.options.paperName ?? '',
+      '-DuplexShortEdge',
+      config.options.duplexShortEdge ? '1' : '0',
       '-Rotate180',
       config.options.rotate180 ? '1' : '0',
     ]
+    if (config.options.paperName?.trim()) args.push('-PaperName', config.options.paperName.trim())
     if (backPath) args.push('-BackPath', backPath)
     try {
       const { stdout, stderr } = await execFileAsync('powershell.exe', args, { timeout: 120000, windowsHide: true })
       const out = stdout.trim()
       const ok = /^OK/m.test(out)
+      const warn = /^WARN (.*)$/m.exec(out)?.[1]
       return {
         ok,
-        message: ok ? `Enviado para "${config.systemName}" (${job.copies} cópia(s)).` : `O driver não confirmou o envio: ${out || stderr}`,
+        message: ok ? `Enviado para "${config.systemName}" (${job.copies} cópia(s)).${warn ? ` Aviso: ${warn}` : ''}` : `O driver não confirmou o envio: ${out || stderr}`,
         details: [out, stderr].filter(Boolean).join('\n'),
       }
     } catch (err) {
@@ -93,11 +96,12 @@ export class SystemPrinterAdapter implements PrinterAdapter {
 
   private async printCups(config: PrinterConfig, job: PrintJobRequest, frontPath: string, backPath: string | null): Promise<PrintResult> {
     const pdfPath = path.join(job.workDir, 'cartao.pdf')
-    const pdf = await buildCardPdf({ frontPng: job.frontPng, backPng: job.backPng ?? null, orientation: job.orientation, rotate180: !!config.options.rotate180 })
+    // A mídia do CUPS é sempre o cartão em paisagem; desenhos em retrato são girados 90° na página.
+    const pdf = await buildCardPdf({ frontPng: job.frontPng, backPng: job.backPng ?? null, orientation: job.orientation, rotate180: !!config.options.rotate180, mediaLandscape: true })
     fs.writeFileSync(pdfPath, pdf)
     const media = config.options.cupsMedia?.trim() || 'Custom.85.6x54mm'
     const args = ['-d', config.systemName!, '-n', String(Math.max(1, job.copies)), '-t', job.jobName, '-o', `media=${media}`, '-o', 'print-scaling=none']
-    if (backPath && config.duplex) args.push('-o', 'sides=two-sided-long-edge')
+    if (backPath && config.duplex) args.push('-o', config.options.duplexShortEdge ? 'sides=two-sided-short-edge' : 'sides=two-sided-long-edge')
     else args.push('-o', 'sides=one-sided')
     if (config.options.cupsExtra) {
       for (const opt of config.options.cupsExtra.split(/\s+/).filter(Boolean)) args.push('-o', opt)
@@ -169,15 +173,18 @@ export class SystemPrinterAdapter implements PrinterAdapter {
 export async function probeDriver(systemName: string): Promise<unknown> {
   try {
     if (os.platform() === 'win32') {
-      const tmp = path.join(os.tmpdir(), `impresso-probe-${process.pid}.ps1`)
-      fs.writeFileSync(tmp, WINDOWS_PROBE_SCRIPT, 'utf8')
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', tmp, '-PrinterName', systemName], { timeout: 30000, windowsHide: true })
+      const tmp = path.join(os.tmpdir(), `impresso-probe-${crypto.randomUUID()}.ps1`)
+      fs.writeFileSync(tmp, '\uFEFF' + WINDOWS_PROBE_SCRIPT, 'utf8')
       try {
-        fs.unlinkSync(tmp)
-      } catch {
-        /* ignore */
+        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', tmp, '-PrinterName', systemName], { timeout: 30000, windowsHide: true })
+        return JSON.parse(stdout.trim() || '{}')
+      } finally {
+        try {
+          fs.unlinkSync(tmp)
+        } catch {
+          /* ignore */
+        }
       }
-      return JSON.parse(stdout.trim() || '{}')
     }
     const { stdout } = await execFileAsync('lpoptions', ['-p', systemName, '-l'], { timeout: 15000 })
     return { ok: true, options: stdout.trim().split('\n').filter(Boolean) }
@@ -229,6 +236,7 @@ param(
   [string]$Duplex = '0',
   [string]$PaperName = '',
   [string]$Rotate180 = '0',
+  [string]$DuplexShortEdge = '0',
   [int]$WaitSeconds = 25
 )
 $ErrorActionPreference = 'Stop'
@@ -261,7 +269,10 @@ function Near($a, $b) { [Math]::Abs($a - $b) -le 5 }
 $paper = $null
 if ($PaperName -ne '') {
   $paper = $doc.PrinterSettings.PaperSizes | Where-Object { $_.PaperName -eq $PaperName } | Select-Object -First 1
-  if (-not $paper) { $paper = $doc.PrinterSettings.PaperSizes | Where-Object { $_.PaperName -like "*$PaperName*" } | Select-Object -First 1 }
+  if (-not $paper) {
+    $escapedPaper = [System.Management.Automation.WildcardPattern]::Escape($PaperName)
+    $paper = $doc.PrinterSettings.PaperSizes | Where-Object { $_.PaperName -like "*$escapedPaper*" } | Select-Object -First 1
+  }
 }
 if (-not $paper) {
   $paper = $doc.PrinterSettings.PaperSizes | Where-Object {
@@ -287,9 +298,20 @@ $doc.DefaultPageSettings.Landscape = ($imageLandscape -ne $paperLandscapeShaped)
 $r300 = $doc.PrinterSettings.PrinterResolutions | Where-Object { $_.Kind -eq 'Custom' -and $_.X -eq 300 } | Select-Object -First 1
 if ($r300) { $doc.DefaultPageSettings.PrinterResolution = $r300 }
 
-if ($Duplex -eq '1' -and $back -and $doc.PrinterSettings.CanDuplex) {
-  $doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Horizontal
+$warning = ''
+if ($Duplex -eq '1' -and $back) {
+  if ($doc.PrinterSettings.CanDuplex) {
+    # Vertical = virada pela borda longa (padrão, igual ao CUPS two-sided-long-edge); Horizontal = borda curta
+    if ($DuplexShortEdge -eq '1') { $doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Horizontal }
+    else { $doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Vertical }
+  } else {
+    # O driver não oferece duplex: imprime só a frente para não gastar um segundo cartão com o verso
+    $back.Dispose(); $back = $null
+    $warning = 'o driver não oferece frente e verso (CanDuplex=false); só a frente foi impressa.'
+    $doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Simplex
+  }
 } else {
+  if ($back) { $back.Dispose(); $back = $null }
   $doc.PrinterSettings.Duplex = [System.Drawing.Printing.Duplex]::Simplex
 }
 
@@ -318,14 +340,17 @@ $status = 'spooled'
 $deadline = (Get-Date).AddSeconds($WaitSeconds)
 while ((Get-Date) -lt $deadline) {
   Start-Sleep -Milliseconds 1000
-  $job = Get-CimInstance Win32_PrintJob -ErrorAction SilentlyContinue | Where-Object { $_.Document -eq $JobName -and $_.Name -like "$PrinterName,*" } | Select-Object -First 1
+  $job = Get-CimInstance Win32_PrintJob -ErrorAction SilentlyContinue | Where-Object { $_.Document -eq $JobName -and ($_.Name.Split(',')[0]) -eq $PrinterName } | Select-Object -First 1
   if (-not $job) { $status = 'done'; break }
   $mask = [int]$job.StatusMask
   if (($mask -band 2) -or ($mask -band 32) -or ($mask -band 64) -or ($mask -band 1024)) {
-    throw ("O trabalho ficou com erro na fila do Windows (status: " + $job.JobStatus + ", mask=" + $mask + "). Verifique fita, cartões e a conexão da impressora.")
+    # Remove o trabalho da fila para não imprimir em duplicidade quando a impressora voltar
+    try { Remove-PrintJob -PrinterName $PrinterName -ID ([int]$job.JobId) -ErrorAction Stop } catch { try { $job | Invoke-CimMethod -MethodName Delete | Out-Null } catch { } }
+    throw ("O trabalho ficou com erro na fila do Windows (status: " + $job.JobStatus + ", mask=" + $mask + ") e foi cancelado. Verifique fita, cartões e a conexão da impressora.")
   }
   if ($mask -band 128) { $status = 'printed'; break }
 }
+if ($warning -ne '') { Write-Output ("WARN " + $warning) }
 Write-Output ("OK status=" + $status + " printer=" + $PrinterName + " paper=" + $paper.PaperName + " " + $paper.Width + "x" + $paper.Height + " landscapeFlag=" + $doc.DefaultPageSettings.Landscape + " copies=" + $Copies)
 `
 

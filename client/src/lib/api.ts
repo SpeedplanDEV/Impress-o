@@ -8,13 +8,27 @@ export class ApiError extends Error {
   }
 }
 
+export const NETWORK_ERROR_MESSAGE = 'Não foi possível conectar ao servidor local. Verifique se o Impress-o está em execução.'
+
+/** Mensagem em português para qualquer erro (rede, API ou inesperado). */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) return err.message
+  if (err instanceof TypeError) return NETWORK_ERROR_MESSAGE
+  return err instanceof Error ? err.message : String(err)
+}
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    credentials: 'same-origin',
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    })
+  } catch {
+    throw new ApiError(0, NETWORK_ERROR_MESSAGE)
+  }
   const text = await res.text()
   let data: unknown = null
   if (text) {
@@ -25,7 +39,8 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     }
   }
   if (!res.ok) {
-    const msg = (data as { error?: string })?.error ?? `Erro ${res.status}`
+    const d = data as { error?: string; result?: { message?: string } } | null
+    const msg = d?.error ?? d?.result?.message ?? `Erro ${res.status}`
     if (res.status === 401 && !url.startsWith('/api/auth/')) {
       window.dispatchEvent(new CustomEvent('impresso:unauthorized'))
     }
@@ -130,7 +145,7 @@ export const personsApi = {
   update: (id: number, body: Partial<PersonInput>) => api.put<Person>(`/api/persons/${id}`, body),
   remove: (id: number) => api.del<{ ok: true }>(`/api/persons/${id}`),
   importCsv: (body: { csv: string; companyId?: number | null; departmentId?: number | null; createDepartments?: boolean }) =>
-    api.post<{ imported: number; createdDepartments: number; errors: string[]; extraColumns: string[] }>('/api/persons/import', body),
+    api.post<{ imported: number; createdDepartments: number; errors: string[]; warnings: string[]; extraColumns: string[] }>('/api/persons/import', body),
 }
 
 export const templatesApi = {
@@ -199,7 +214,13 @@ export const costApi = {
   saveParams: (params: CostParams) => api.put<{ params: CostParams }>('/api/cost/params', { params }),
   presets: () => api.get<{ ribbons: RibbonSpec[] }>('/api/cost/presets'),
   calculate: (body: { sides: 1 | 2; quantity: number; params?: CostParams }) => api.post<{ params: CostParams; breakdown: CostBreakdown }>('/api/cost/calculate', body),
-  summary: () => api.get<CostSummary>('/api/cost/summary'),
+  summary: (range?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams()
+    if (range?.from) qs.set('from', range.from)
+    if (range?.to) qs.set('to', range.to)
+    const q = qs.toString()
+    return api.get<CostSummary>(`/api/cost/summary${q ? `?${q}` : ''}`)
+  },
 }
 
 export const settingsApi = {

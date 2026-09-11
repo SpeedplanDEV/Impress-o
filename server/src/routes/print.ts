@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { getDb } from '../lib/db.js'
 import { config } from '../lib/config.js'
 import { HttpError, parseId, validate } from '../lib/http.js'
-import { getAdapter } from '../printer/index.js'
+import { getAdapter, type PrinterConfig, type PrintJobRequest, type PrintResult } from '../printer/index.js'
 import { getPrinter, getDefaultPrinter } from './printers.js'
 import { getActiveCostParams } from './cost.js'
 import { computeCardCost } from '../../../shared/cost.js'
@@ -93,6 +93,31 @@ function getJob(id: number): JobRow | null {
   return (getDb().prepare('SELECT * FROM print_jobs WHERE id = ?').get(id) as unknown as JobRow | undefined) ?? null
 }
 
+/** Executa o adaptador e sempre fecha o job (mesmo se o adaptador lançar exceção). */
+async function runJob(jobId: number, printer: PrinterConfig, request: Omit<PrintJobRequest, 'workDir'>): Promise<PrintResult> {
+  const workDir = path.join(config.printOutputDir, `job-${String(jobId).padStart(6, '0')}`)
+  let result: PrintResult
+  try {
+    result = await getAdapter(printer.adapter).print(printer, { ...request, workDir })
+  } catch (err) {
+    result = { ok: false, message: `Falha ao executar a impressão: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  getDb()
+    .prepare(`UPDATE print_jobs SET status = ?, error = ?, output_path = ?, finished_at = datetime('now') WHERE id = ?`)
+    .run(result.ok ? 'done' : 'error', result.ok ? null : `${result.message}${result.details ? `\n${result.details}` : ''}`.slice(0, 4000), result.outputPath ?? null, jobId)
+  if (!result.ok) {
+    // Mantém as imagens para diagnóstico quando falhar
+    try {
+      fs.mkdirSync(workDir, { recursive: true })
+      if (!fs.existsSync(path.join(workDir, 'frente.png'))) fs.writeFileSync(path.join(workDir, 'frente.png'), request.frontPng)
+      if (request.backPng && !fs.existsSync(path.join(workDir, 'verso.png'))) fs.writeFileSync(path.join(workDir, 'verso.png'), request.backPng)
+    } catch {
+      /* ignore */
+    }
+  }
+  return result
+}
+
 /** Cria e executa um trabalho de impressão. */
 printRouter.post('/jobs', async (req, res) => {
   const body = validate(jobSchema, req.body)
@@ -104,6 +129,12 @@ printRouter.post('/jobs', async (req, res) => {
   const backPng = body.backPng ? pngFromDataUrl(body.backPng, 'Verso') : null
   if (backPng) checkSize(backPng, body.orientation, 'Verso')
   const sides: 1 | 2 = backPng ? 2 : 1
+  if (backPng && printer.adapter === 'system' && !printer.duplex) {
+    throw new HttpError(400, `A impressora "${printer.name}" não está configurada para frente e verso. Ative "Imprime frente e verso" nas configurações da impressora (DS2/DS3/DSE) ou use um modelo só frente.`)
+  }
+
+  if (body.personId && !getDb().prepare('SELECT 1 FROM persons WHERE id = ?').get(body.personId)) throw new HttpError(404, 'Pessoa não encontrada.')
+  if (body.templateId && !getDb().prepare('SELECT 1 FROM templates WHERE id = ?').get(body.templateId)) throw new HttpError(404, 'Modelo não encontrado.')
 
   const costParams = getActiveCostParams()
   const cost = computeCardCost(costParams, { sides, quantity: body.copies })
@@ -116,35 +147,15 @@ printRouter.post('/jobs', async (req, res) => {
     )
     .run(printer.id, printer.name, body.personId ?? null, body.templateId ?? null, body.personName ?? null, body.templateName ?? null, body.copies, sides, JSON.stringify(cost), cost.unitCost, cost.totalCost)
   const jobId = Number(info.lastInsertRowid)
-  const workDir = path.join(config.printOutputDir, `job-${String(jobId).padStart(6, '0')}`)
 
-  const result = await getAdapter(printer.adapter).print(printer, {
+  const result = await runJob(jobId, printer, {
     frontPng,
     backPng,
     orientation: body.orientation,
     copies: body.copies,
     jobName: `Impress-o #${jobId} ${body.personName ?? ''}`.trim(),
-    workDir,
   })
-
-  db.prepare(`UPDATE print_jobs SET status = ?, error = ?, output_path = ?, finished_at = datetime('now') WHERE id = ?`).run(
-    result.ok ? 'done' : 'error',
-    result.ok ? null : `${result.message}${result.details ? `\n${result.details}` : ''}`.slice(0, 4000),
-    result.outputPath ?? null,
-    jobId,
-  )
-  if (!result.ok) {
-    // Mantém os arquivos para diagnóstico quando falhar
-    try {
-      if (!fs.existsSync(path.join(workDir, 'frente.png'))) {
-        fs.mkdirSync(workDir, { recursive: true })
-        fs.writeFileSync(path.join(workDir, 'frente.png'), frontPng)
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  res.status(result.ok ? 201 : 502).json({ job: serializeJob(getJob(jobId)!), result })
+  res.status(result.ok ? 201 : 502).json({ ok: result.ok, error: result.ok ? undefined : result.message, job: serializeJob(getJob(jobId)!), result })
 })
 
 printRouter.get('/jobs', (req, res) => {
@@ -185,7 +196,7 @@ printRouter.post('/pdf', async (req, res) => {
       orientation: z.enum(['landscape', 'portrait']).default('landscape'),
       frontPng: z.string().min(100),
       backPng: z.string().min(100).nullable().optional(),
-      fileName: z.string().max(100).optional(),
+      fileName: z.string().max(200).optional(),
     }),
     req.body,
   )
@@ -215,13 +226,12 @@ printRouter.post('/calibration', async (req, res) => {
   if (!printer) throw new HttpError(400, 'Nenhuma impressora configurada.')
   const size = cardPixelSize(body.orientation)
   const png = buildCalibrationCard(size.width, size.height)
+  const cost = computeCardCost(getActiveCostParams(), { sides: 1, quantity: 1 })
   const db = getDb()
   const info = db
-    .prepare(`INSERT INTO print_jobs (printer_id, printer_name, person_name, template_name, copies, sides, status) VALUES (?, ?, 'Cartão de teste', 'Calibração', 1, 1, 'printing')`)
-    .run(printer.id, printer.name)
+    .prepare(`INSERT INTO print_jobs (printer_id, printer_name, person_name, template_name, copies, sides, status, cost_json, unit_cost, total_cost) VALUES (?, ?, 'Cartão de teste', 'Calibração', 1, 1, 'printing', ?, ?, ?)`)
+    .run(printer.id, printer.name, JSON.stringify(cost), cost.unitCost, cost.totalCost)
   const jobId = Number(info.lastInsertRowid)
-  const workDir = path.join(config.printOutputDir, `job-${String(jobId).padStart(6, '0')}`)
-  const result = await getAdapter(printer.adapter).print(printer, { frontPng: png, backPng: null, orientation: body.orientation, copies: 1, jobName: `Impress-o #${jobId} teste`, workDir })
-  db.prepare(`UPDATE print_jobs SET status = ?, error = ?, output_path = ?, finished_at = datetime('now') WHERE id = ?`).run(result.ok ? 'done' : 'error', result.ok ? null : result.message, result.outputPath ?? null, jobId)
-  res.status(result.ok ? 201 : 502).json({ job: serializeJob(getJob(jobId)!), result })
+  const result = await runJob(jobId, printer, { frontPng: png, backPng: null, orientation: body.orientation, copies: 1, jobName: `Impress-o #${jobId} teste` })
+  res.status(result.ok ? 201 : 502).json({ ok: result.ok, error: result.ok ? undefined : result.message, job: serializeJob(getJob(jobId)!), result })
 })

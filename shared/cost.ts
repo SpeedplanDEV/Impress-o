@@ -29,8 +29,9 @@ export interface CostParams {
   /** Preço unitário do cartão PVC em branco (R$) */
   cardUnitPrice: number
   ribbon: RibbonSpec
-  /** Kit/cartão de limpeza: preço e a cada quantos cartões impressos é usado */
+  /** Kit de limpeza: preço do kit, quantas limpezas o kit rende e a cada quantos cartões se limpa */
   cleaningKitPrice: number
+  cleaningCardsPerKit: number
   cleaningIntervalCards: number
   /** Depreciação da impressora: preço dividido pela vida útil estimada em cartões */
   printerPrice: number
@@ -49,7 +50,7 @@ export interface CostParams {
   wasteRatePercent: number
   /** Custos indiretos (%) sobre o custo direto */
   overheadPercent: number
-  /** Margem de lucro (%) sobre o custo total, para formar o preço de venda */
+  /** Margem sobre o custo (markup, %) aplicada ao custo total para formar o preço de venda */
   marginPercent: number
   /** Impostos sobre a venda (%) — aplicados "por dentro" no preço final */
   taxPercent: number
@@ -117,7 +118,8 @@ export function computeCardCost(params: CostParams, job: CostJobInput): CostBrea
 
   const card = nonNeg(params.cardUnitPrice)
   const ribbon = ribbonCostPerCard(params.ribbon, sides)
-  const cleaning = nonNeg(params.cleaningIntervalCards) > 0 ? nonNeg(params.cleaningKitPrice) / nonNeg(params.cleaningIntervalCards) : 0
+  const perCleaning = nonNeg(params.cleaningCardsPerKit) > 0 ? nonNeg(params.cleaningKitPrice) / nonNeg(params.cleaningCardsPerKit) : nonNeg(params.cleaningKitPrice)
+  const cleaning = nonNeg(params.cleaningIntervalCards) > 0 ? perCleaning / nonNeg(params.cleaningIntervalCards) : 0
   const consumables = card + ribbon + cleaning
   const waste = consumables * (nonNeg(params.wasteRatePercent) / 100)
 
@@ -157,8 +159,8 @@ export function computeCardCost(params: CostParams, job: CostJobInput): CostBrea
     unitPrice: r4(unitPrice),
     quantity,
     sides,
-    totalCost: r4(unitCost * quantity),
-    totalPrice: r4(unitPrice * quantity),
+    totalCost: r4(r4(unitCost) * quantity),
+    totalPrice: r4(r4(unitPrice) * quantity),
     ribbonImagesPerCard: ribbonImagesPerCard(params.ribbon, sides),
   }
 }
@@ -181,6 +183,7 @@ export const DEFAULT_COST_PARAMS: CostParams = {
   cardUnitPrice: 0.9,
   ribbon: SIGMA_RIBBON_PRESETS[0],
   cleaningKitPrice: 120,
+  cleaningCardsPerKit: 10,
   cleaningIntervalCards: 500,
   printerPrice: 12000,
   printerLifeCards: 50000,
@@ -218,6 +221,7 @@ export function normalizeCostParams(input: unknown): CostParams {
     cardUnitPrice: n(src.cardUnitPrice, d.cardUnitPrice),
     ribbon,
     cleaningKitPrice: n(src.cleaningKitPrice, d.cleaningKitPrice),
+    cleaningCardsPerKit: n(src.cleaningCardsPerKit, d.cleaningCardsPerKit),
     cleaningIntervalCards: n(src.cleaningIntervalCards, d.cleaningIntervalCards),
     printerPrice: n(src.printerPrice, d.printerPrice),
     printerLifeCards: n(src.printerLifeCards, d.printerLifeCards),

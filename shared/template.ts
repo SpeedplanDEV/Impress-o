@@ -139,11 +139,11 @@ export function validateTemplateDoc(input: unknown): { ok: true; doc: CardTempla
   if (!input || typeof input !== 'object') return { ok: false, error: 'Arquivo não contém um objeto JSON.' }
   const o = input as Record<string, unknown>
   if (o.format !== TEMPLATE_FORMAT) return { ok: false, error: `Formato não reconhecido (esperado "${TEMPLATE_FORMAT}").` }
-  if (typeof o.version !== 'number' || o.version > TEMPLATE_VERSION) return { ok: false, error: 'Versão do modelo não suportada.' }
+  if (!Number.isInteger(o.version) || (o.version as number) < 1 || (o.version as number) > TEMPLATE_VERSION) return { ok: false, error: 'Versão do modelo não suportada.' }
   if (typeof o.name !== 'string' || !o.name.trim()) return { ok: false, error: 'O modelo precisa de um nome.' }
   if (o.orientation !== 'landscape' && o.orientation !== 'portrait') return { ok: false, error: 'Orientação inválida.' }
   const front = o.front as Record<string, unknown> | undefined
-  if (!front || typeof front !== 'object' || !front.fabric || typeof front.fabric !== 'object') {
+  if (!front || typeof front !== 'object' || !isFabricDoc(front.fabric)) {
     return { ok: false, error: 'O modelo não possui o desenho da frente.' }
   }
   const landscape = o.orientation === 'landscape'
@@ -152,7 +152,7 @@ export function validateTemplateDoc(input: unknown): { ok: true; doc: CardTempla
     version: TEMPLATE_VERSION,
     name: (o.name as string).trim(),
     orientation: o.orientation,
-    doubleSided: Boolean(o.doubleSided) && !!o.back,
+    doubleSided: false,
     dpi: 300,
     width: landscape ? 1013 : 638,
     height: landscape ? 638 : 1013,
@@ -163,11 +163,17 @@ export function validateTemplateDoc(input: unknown): { ok: true; doc: CardTempla
     meta: typeof o.meta === 'object' && o.meta ? (o.meta as Record<string, unknown>) : undefined,
   }
   const back = o.back as Record<string, unknown> | undefined
-  if (back && typeof back === 'object' && back.fabric && typeof back.fabric === 'object') {
+  if (back && typeof back === 'object' && isFabricDoc(back.fabric)) {
     doc.back = {
       fabric: back.fabric as Record<string, unknown>,
       backgroundColor: typeof back.backgroundColor === 'string' ? back.backgroundColor : '#ffffff',
     }
   }
+  doc.doubleSided = Boolean(o.doubleSided) && !!doc.back
   return { ok: true, doc }
+}
+
+/** Um documento Fabric.js mínimo: objeto com lista de objetos. */
+function isFabricDoc(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray((v as Record<string, unknown>).objects)
 }

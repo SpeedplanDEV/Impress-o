@@ -5,6 +5,7 @@ const base: CostParams = {
   cardUnitPrice: 1,
   ribbon: { name: 'YMCKT', price: 500, yieldImages: 500, yieldMode: 'per_side' },
   cleaningKitPrice: 100,
+  cleaningCardsPerKit: 1,
   cleaningIntervalCards: 1000,
   printerPrice: 10000,
   printerLifeCards: 100000,
@@ -81,6 +82,17 @@ describe('computeCardCost', () => {
     expect(c.card).toBe(0)
     expect(c.quantity).toBe(0)
     expect(c.totalCost).toBe(0)
+  })
+})
+
+describe('limpeza', () => {
+  it('divide o kit pelo número de limpezas que ele rende', () => {
+    const c = computeCardCost({ ...base, cleaningKitPrice: 120, cleaningCardsPerKit: 10, cleaningIntervalCards: 500 }, { sides: 1, quantity: 1 })
+    expect(c.cleaning).toBeCloseTo(0.024)
+  })
+  it('totais do lote usam o valor unitário arredondado', () => {
+    const c = computeCardCost({ ...base, cardUnitPrice: 0.33333 }, { sides: 1, quantity: 3 })
+    expect(c.totalCost).toBeCloseTo(c.unitCost * 3, 4)
   })
 })
 

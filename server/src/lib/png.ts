@@ -110,15 +110,16 @@ export function buildCalibrationCard(width: number, height: number, dpi = 300): 
   const cy = Math.round(height / 2)
   img.rect(cx - Math.round(5 * mm), cy, Math.round(10 * mm), 1, black)
   img.rect(cx, cy - Math.round(5 * mm), 1, Math.round(10 * mm), black)
-  // Blocos de cor (C M Y K R G B) de 8 mm
+  // Blocos de cor (C M Y K R G B); tamanho proporcional ao lado menor para caber em retrato
   const colors: [number, number, number][] = [[0, 174, 239], [236, 0, 140], [255, 241, 0], [0, 0, 0], [255, 0, 0], [0, 160, 0], [0, 0, 255]]
-  const size = Math.round(8 * mm)
+  const size = Math.round(Math.min(8 * mm, (Math.min(width, height) - 4 * mm) / colors.length - 4))
   const startX = cx - Math.round((colors.length * (size + 4)) / 2)
   colors.forEach((c, i) => img.rect(startX + i * (size + 4), cy + Math.round(8 * mm), size, size, c))
   // Escala de cinza
+  const gw = Math.round((colors.length * (size + 4)) / 10)
   for (let i = 0; i < 10; i++) {
     const v = Math.round(255 - i * 25)
-    img.rect(startX + i * Math.round(size * 0.7), cy - Math.round(16 * mm), Math.round(size * 0.7), Math.round(5 * mm), [v, v, v])
+    img.rect(startX + i * gw, cy - Math.round(16 * mm), gw, Math.round(5 * mm), [v, v, v])
   }
   return img.toPng()
 }

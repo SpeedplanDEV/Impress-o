@@ -15,18 +15,25 @@ let server: Server
 let base = ''
 let cookie = ''
 
-async function call(method: string, url: string, body?: unknown, opts: { raw?: boolean } = {}) {
+interface CallResult {
+  status: number
+  data: any // eslint-disable-line @typescript-eslint/no-explicit-any
+  buffer: Buffer
+  headers: Headers
+}
+
+async function call(method: string, url: string, body?: unknown, opts: { raw?: boolean; headers?: Record<string, string> } = {}): Promise<CallResult> {
   const res = await fetch(base + url, {
     method,
-    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { cookie } : {}) },
+    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { cookie } : {}), ...(opts.headers ?? {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     redirect: 'manual',
   })
   const setCookie = res.headers.get('set-cookie')
   if (setCookie) cookie = setCookie.split(';')[0]
-  if (opts.raw) return { status: res.status, buffer: Buffer.from(await res.arrayBuffer()), headers: res.headers }
+  if (opts.raw) return { status: res.status, buffer: Buffer.from(await res.arrayBuffer()), data: null, headers: res.headers }
   const text = await res.text()
-  return { status: res.status, data: text ? JSON.parse(text) : null, headers: res.headers }
+  return { status: res.status, data: text ? JSON.parse(text) : null, buffer: Buffer.alloc(0), headers: res.headers }
 }
 
 // PNG 1013x638 mínimo (gerado sem dependências): cabeçalho válido com IHDR correto.
@@ -98,6 +105,28 @@ describe('autenticação de usuário único', () => {
     const again = await call('POST', '/api/auth/setup', { name: 'Outro', password: 'segredo123' })
     expect(again.status).toBe(409)
   })
+  it('cookie malformado de outro app não derruba a API', async () => {
+    const r = await call('GET', '/api/auth/status', undefined, { headers: { cookie: 'layout=100%; outro=%zz' } })
+    expect(r.status).toBe(200)
+  })
+  it('rejeita Host desconhecido (DNS rebinding) e origem cruzada', async () => {
+    // fetch() não permite alterar o cabeçalho Host; usa http.request diretamente
+    const http = await import('node:http')
+    const addr = server.address() as { port: number }
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: addr.port, path: '/api/auth/status', method: 'GET', headers: { Host: 'evil.example.com' } }, (res) => {
+        res.resume()
+        resolve(res.statusCode ?? 0)
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    expect(status).toBe(421)
+    const r2 = await call('POST', '/api/auth/login', { password: 'x' }, { headers: { origin: 'https://evil.example.com' } })
+    expect(r2.status).toBe(403)
+    const r3 = await call('POST', '/api/auth/login', { password: 'x' }, { headers: { 'sec-fetch-site': 'cross-site' } })
+    expect(r3.status).toBe(403)
+  })
   it('logout, login com senha errada e certa', async () => {
     await call('POST', '/api/auth/logout')
     cookie = ''
@@ -146,14 +175,16 @@ describe('empresas, departamentos e pessoas', () => {
     expect(data.data.logoUrl).toMatch(/^data:image\/png;base64,/)
   })
   it('importa CSV com ponto e vírgula e cria departamentos', async () => {
-    const csv = 'Nome;Cargo;Departamento;Matrícula;Validade\nMaria Souza;Gerente;Financeiro;100;31/12/2027\nPedro Lima;Auxiliar;TI;101;\n'
+    const csv = 'Nome;Cargo;Departamento;Matrícula;Validade;Tipo Sanguíneo\nMaria Souza;Gerente;Financeiro;100;31/12/2027;O+\nPedro Lima;Auxiliar;TI;101;;A-\n'
     const r = await call('POST', '/api/persons/import', { csv, companyId, createDepartments: true })
     expect(r.status).toBe(200)
     expect(r.data.imported).toBe(2)
     expect(r.data.createdDepartments).toBe(1)
+    expect(r.data.extraColumns).toEqual(['tipo_sanguineo'])
     const maria = (await call('GET', '/api/persons?q=Maria')).data[0]
     expect(maria.departmentName).toBe('Financeiro')
     expect(maria.validUntil).toBe('2027-12-31')
+    expect(maria.extra).toEqual({ tipo_sanguineo: 'O+' })
   })
   it('rejeita departamento de outra empresa', async () => {
     const other = await call('POST', '/api/companies', { name: 'Outra' })
@@ -219,6 +250,8 @@ describe('custo e impressão', () => {
     expect(out.status).toBe(200)
     const summary = await call('GET', '/api/cost/summary')
     expect(summary.data.totals.cards).toBe(2)
+    expect(summary.data.totals.totalCost).toBeCloseTo(4)
+    expect(summary.data.byMonth[0].totalCost).toBeCloseTo(4)
     const pdf = await call('POST', '/api/print/pdf', { frontPng: makePng(1013, 638), backPng: makePng(1013, 638) }, { raw: true })
     expect(pdf.status).toBe(200)
     expect(pdf.buffer.subarray(0, 4).toString()).toBe('%PDF')
@@ -226,5 +259,30 @@ describe('custo e impressão', () => {
   it('impressora do sistema sem fila é rejeitada', async () => {
     const r = await call('POST', '/api/printers', { name: 'Sigma', adapter: 'system' })
     expect(r.status).toBe(400)
+  })
+  it('excluir impressora mantém exatamente uma padrão (a escolhida)', async () => {
+    const b = await call('POST', '/api/printers', { name: 'Sigma B', adapter: 'system', systemName: 'Entrust Sigma DS', isDefault: true })
+    const c = await call('POST', '/api/printers', { name: 'Mock C', adapter: 'mock' })
+    expect((await call('DELETE', `/api/printers/${c.data.id}`)).status).toBe(200)
+    let list = (await call('GET', '/api/printers')).data as { id: number; isDefault: boolean }[]
+    expect(list.filter((p) => p.isDefault).map((p) => p.id)).toEqual([b.data.id])
+    expect((await call('DELETE', `/api/printers/${b.data.id}`)).status).toBe(200)
+    list = (await call('GET', '/api/printers')).data
+    expect(list.filter((p) => p.isDefault)).toHaveLength(1)
+  })
+  it('verso em impressora do sistema sem duplex é recusado com mensagem clara', async () => {
+    const p = await call('POST', '/api/printers', { name: 'Sigma simplex', adapter: 'system', systemName: 'Fila X', duplex: false })
+    const r = await call('POST', '/api/print/jobs', { printerId: p.data.id, frontPng: makePng(1013, 638), backPng: makePng(1013, 638), copies: 1 })
+    expect(r.status).toBe(400)
+    expect(r.data.error).toContain('frente e verso')
+    await call('DELETE', `/api/printers/${p.data.id}`)
+  })
+  it('falha da impressora devolve mensagem legível e registra erro no histórico', async () => {
+    const p = await call('POST', '/api/printers', { name: 'Sigma inexistente', adapter: 'system', systemName: 'Fila Que Nao Existe' })
+    const r = await call('POST', '/api/print/jobs', { printerId: p.data.id, frontPng: makePng(1013, 638), copies: 1 })
+    expect(r.status).toBe(502)
+    expect(typeof r.data.error).toBe('string')
+    expect(r.data.job.status).toBe('error')
+    await call('DELETE', `/api/printers/${p.data.id}`)
   })
 })

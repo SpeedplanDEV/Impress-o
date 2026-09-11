@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { cardsApi, companiesApi, departmentsApi, personsApi, printApi, printersApi, templatesApi, costApi, downloadBlob } from '../lib/api'
+import { cardsApi, companiesApi, departmentsApi, personsApi, printApi, printersApi, templatesApi, costApi, downloadBlob, errorMessage } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
 import { renderCardForPrint } from '../editor/render'
 import { brl, formatDateTime } from '../lib/format'
@@ -49,14 +49,23 @@ export default function PrintPage() {
 
   const selectedPersons = useMemo(() => (persons.data ?? []).filter((p) => selected.has(p.id)), [persons.data, selected])
   const sides = rendered.some((r) => r.back) ? 2 : 1
+  const [stale, setStale] = useState(false)
   useEffect(() => {
-    const qty = selected.size * copies
+    const qty = (rendered.length > 0 ? rendered.length : selected.size) * copies
     if (qty === 0) {
       setEstimate(null)
       return
     }
     costApi.calculate({ sides: sides as 1 | 2, quantity: qty }).then((r) => setEstimate(r.breakdown)).catch(() => setEstimate(null))
-  }, [selected.size, copies, sides])
+  }, [selected.size, rendered.length, copies, sides])
+  // Mudou a seleção ou o modelo depois de gerar: a pré-visualização fica marcada como desatualizada
+  useEffect(() => {
+    if (rendered.length === 0) return
+    const ids = new Set(rendered.map((r) => r.personId))
+    const same = ids.size === selected.size && [...selected].every((id) => ids.has(id))
+    setStale(!same)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, templateOverride])
 
   function toggle(id: number) {
     setSelected((s) => {
@@ -82,10 +91,11 @@ export default function PrintPage() {
         const r = await renderCardForPrint(template.design, data)
         out.push({ personId: p.id, personName: p.fullName, template, front: r.front, back: r.back, warnings: r.warnings })
       } catch (err) {
-        setLog((l) => [...l, { kind: 'error', text: `${p.fullName}: ${err instanceof Error ? err.message : String(err)}` }])
+        setLog((l) => [...l, { kind: 'error', text: `${p.fullName}: ${errorMessage(err)}` }])
       }
     }
     setRendered(out)
+    setStale(false)
     setRendering(false)
   }
 
@@ -121,7 +131,7 @@ export default function PrintPage() {
         ok++
         setLog((l) => [...l, { kind: 'success', text: `${r.personName}: ${res.result.message} Custo: ${brl.format(res.job.totalCost ?? 0)}` }])
       } catch (err) {
-        setLog((l) => [...l, { kind: 'error', text: `${r.personName}: ${err instanceof Error ? err.message : String(err)}` }])
+        setLog((l) => [...l, { kind: 'error', text: `${r.personName}: ${errorMessage(err)}` }])
       }
     }
     setPrinting(false)
@@ -131,10 +141,10 @@ export default function PrintPage() {
 
   async function downloadPdf(r: Rendered) {
     try {
-      const blob = await printApi.downloadPdf({ orientation: r.template.design.orientation, frontPng: r.front, backPng: r.back, fileName: r.personName })
+      const blob = await printApi.downloadPdf({ orientation: r.template.design.orientation, frontPng: r.front, backPng: r.back, fileName: r.personName.slice(0, 100) })
       downloadBlob(blob, `${r.personName.replace(/\s+/g, '_')}.pdf`)
     } catch (err) {
-      setLog((l) => [...l, { kind: 'error', text: err instanceof Error ? err.message : String(err) }])
+      setLog((l) => [...l, { kind: 'error', text: errorMessage(err) }])
     }
   }
 
@@ -152,7 +162,7 @@ export default function PrintPage() {
           </label>
           <label className="inline">
             Cópias
-            <input type="number" min={1} max={100} value={copies} onChange={(e) => setCopies(Math.max(1, Number(e.target.value) || 1))} style={{ width: 70 }} />
+            <input type="number" min={1} max={100} value={copies} onChange={(e) => setCopies(Math.min(100, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 70 }} />
           </label>
         </div>
       </div>
@@ -214,6 +224,7 @@ export default function PrintPage() {
             </div>
           )}
           {rendered.length === 0 && <div className="empty">Selecione pessoas e clique em "Gerar pré-visualização".</div>}
+          {stale && rendered.length > 0 && <div className="alert warning small">A seleção ou o modelo mudou depois da pré-visualização. Gere novamente antes de imprimir.</div>}
           <div className="stack" style={{ maxHeight: 520, overflow: 'auto' }}>
             {rendered.map((r) => (
               <div key={r.personId} className="card" style={{ padding: 10 }}>
@@ -235,7 +246,7 @@ export default function PrintPage() {
           </div>
           {rendered.length > 0 && (
             <div className="row end" style={{ marginTop: 12 }}>
-              <button className="btn primary" onClick={() => void printAll()} disabled={printing || !printerId}>
+              <button className="btn primary" onClick={() => void printAll()} disabled={printing || !printerId || stale}>
                 {printing ? 'Enviando…' : `Imprimir ${rendered.length} cartão(ões) × ${copies}`}
               </button>
             </div>

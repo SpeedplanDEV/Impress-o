@@ -15,8 +15,9 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
 - **A renderização do cartão acontece no navegador** (canvas do Fabric.js, no tamanho real de
   impressão). O servidor só recebe o PNG pronto e entrega ao driver. Isso evita dependências
   nativas (canvas/cairo) na máquina do usuário.
-- **O servidor é local e de usuário único**: senha com scrypt, sessão em cookie HttpOnly,
-  bloqueio progressivo após tentativas erradas.
+- **O servidor é local e de usuário único**: senha com scrypt, sessão em cookie HttpOnly (SameSite=Lax),
+  bloqueio progressivo após tentativas erradas, validação de `Host`/`Origin` (contra DNS rebinding e
+  requisições de outros sites) e arquivos enviados servidos com CSP `sandbox` (SVG nunca executa script).
 - **Persistência**: SQLite embutido no Node (`node:sqlite`, sem compilação) + arquivos em `data/`.
 
 ## Módulos
@@ -53,10 +54,13 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
    - **system / Windows**: `powershell.exe -File print.ps1` com `System.Drawing.Printing.PrintDocument`:
      `StandardPrintController` (sem diálogo), margens 0, tamanho de papel CR80 do driver (por nome
      ou por dimensão ≈ 3,375 × 2,125 pol., em qualquer orientação; sinalizador *Landscape* calculado
-     em relação à forma do papel), resolução 300 dpi se exposta, duplex se `CanDuplex`, cópias;
-     acompanha `Win32_PrintJob` por até 25 s para detectar erro/offline.
-   - **system / CUPS (Linux)**: PDF com página de 243 × 153 pt e
-     `lp -d <fila> -n <cópias> -o media=Custom.85.6x54mm -o print-scaling=none`.
+     em relação à forma do papel), resolução 300 dpi se exposta, duplex se `CanDuplex` (borda longa por
+     padrão, igual ao CUPS; opção de borda curta), cópias; acompanha `Win32_PrintJob` por até 25 s e,
+     em erro/offline, cancela o job na fila para não imprimir em duplicidade depois.
+     Se o driver não oferecer duplex, imprime só a frente e avisa. Um modelo com verso em impressora
+     configurada como só frente é recusado antes de imprimir.
+   - **system / CUPS (Linux)**: PDF com página de 243 × 153 pt (desenhos em retrato são girados 90°
+     para a mídia em paisagem) e `lp -d <fila> -n <cópias> -o media=Custom.85.6x54mm -o print-scaling=none`.
    - **mock**: grava `frente.png`/`verso.png` em `data/print-output/job-NNNNNN/`.
 4. Resultado e custo ficam no histórico (`print_jobs`).
 

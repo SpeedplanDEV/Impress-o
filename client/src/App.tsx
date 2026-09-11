@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { authApi, type AuthStatus } from './lib/api'
+import { authApi, errorMessage, type AuthStatus } from './lib/api'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
@@ -22,7 +22,7 @@ export default function App() {
       setStatus(await authApi.status())
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não foi possível conectar ao servidor local.')
+      setError(errorMessage(err))
     }
   }, [])
 

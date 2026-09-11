@@ -24,6 +24,9 @@ assetsRouter.get('/:id', (req, res) => {
   if (!fs.existsSync(p)) throw new HttpError(404, 'Arquivo não encontrado no disco.')
   res.setHeader('Content-Type', asset.mime)
   res.setHeader('Cache-Control', 'private, max-age=86400')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  // Arquivos enviados pelo usuário (inclusive SVG) nunca executam script no contexto da aplicação
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox")
   res.sendFile(p)
 })
 

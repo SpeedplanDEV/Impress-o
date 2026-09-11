@@ -210,7 +210,7 @@ personsRouter.delete('/:id', (req, res) => {
 
 /* ------------------------- Importação em lote (CSV) ------------------------ */
 
-const CSV_HEADERS: Record<string, keyof typeof CSV_MAP> = {}
+const CSV_HEADERS = new Map<string, keyof typeof CSV_MAP>()
 const CSV_MAP = {
   full_name: ['nome', 'nome completo', 'nome_completo', 'full_name', 'fullname', 'name'],
   display_name: ['nome de exibição', 'nome de exibicao', 'apelido', 'display_name', 'displayname'],
@@ -223,7 +223,7 @@ const CSV_MAP = {
   department: ['departamento', 'setor', 'department', 'area', 'área'],
   company: ['empresa', 'company', 'organização', 'organizacao'],
 }
-for (const [field, names] of Object.entries(CSV_MAP)) for (const n of names) CSV_HEADERS[n] = field as keyof typeof CSV_MAP
+for (const [field, names] of Object.entries(CSV_MAP)) for (const n of names) CSV_HEADERS.set(n, field as keyof typeof CSV_MAP)
 
 const importSchema = z.object({
   csv: z.string().min(1, 'Arquivo vazio.'),
@@ -234,6 +234,16 @@ const importSchema = z.object({
 
 function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/^﻿/, '')
+}
+
+/** Nome de campo extra utilizável em {{placeholders}}: sem acentos, só letras/números/_ . */
+export function slugifyField(h: string): string {
+  return h
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
 }
 
 /** Converte datas dd/mm/aaaa em aaaa-mm-dd. */
@@ -254,9 +264,12 @@ personsRouter.post('/import', (req, res) => {
   const colIndex: Partial<Record<keyof typeof CSV_MAP, number>> = {}
   const extraCols: { name: string; index: number }[] = []
   header.forEach((h, i) => {
-    const field = CSV_HEADERS[h]
+    const field = CSV_HEADERS.get(h)
     if (field && colIndex[field] === undefined) colIndex[field] = i
-    else if (h) extraCols.push({ name: h, index: i })
+    else if (h) {
+      const name = slugifyField(h)
+      if (name) extraCols.push({ name, index: i })
+    }
   })
   if (colIndex.full_name === undefined) {
     throw new HttpError(400, 'Não encontrei a coluna "nome" no cabeçalho do CSV.')
@@ -271,6 +284,7 @@ personsRouter.post('/import', (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   const errors: string[] = []
+  const warnings: string[] = []
   let imported = 0
   let createdDepartments = 0
   db.exec('BEGIN')
@@ -291,17 +305,36 @@ personsRouter.post('/import', (req, res) => {
         if (c) companyId = c.id
         else if (body.createDepartments) {
           companyId = Number(db.prepare('INSERT INTO companies (name) VALUES (?)').run(companyName).lastInsertRowid)
+        } else {
+          warnings.push(`Linha ${r + 1}: empresa "${companyName}" não encontrada; pessoa importada sem empresa.`)
         }
       }
       let departmentId = body.departmentId ?? null
       const departmentName = cell('department')
-      if (!departmentId && departmentName && companyId) {
-        const d = db.prepare('SELECT id FROM departments WHERE company_id = ? AND name = ? COLLATE NOCASE').get(companyId, departmentName) as unknown as { id: number } | undefined
-        if (d) departmentId = d.id
-        else if (body.createDepartments) {
-          departmentId = Number(db.prepare('INSERT INTO departments (company_id, name) VALUES (?, ?)').run(companyId, departmentName).lastInsertRowid)
-          createdDepartments++
+      if (!departmentId && departmentName) {
+        if (companyId) {
+          const d = db.prepare('SELECT id FROM departments WHERE company_id = ? AND name = ? COLLATE NOCASE').get(companyId, departmentName) as unknown as { id: number } | undefined
+          if (d) departmentId = d.id
+          else if (body.createDepartments) {
+            departmentId = Number(db.prepare('INSERT INTO departments (company_id, name) VALUES (?, ?)').run(companyId, departmentName).lastInsertRowid)
+            createdDepartments++
+          } else {
+            warnings.push(`Linha ${r + 1}: departamento "${departmentName}" não encontrado na empresa; pessoa importada sem departamento.`)
+          }
+        } else {
+          const d = db.prepare('SELECT id, company_id FROM departments WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 1').get(departmentName) as unknown as { id: number; company_id: number } | undefined
+          if (d) {
+            departmentId = d.id
+            companyId = d.company_id
+          } else {
+            warnings.push(`Linha ${r + 1}: departamento "${departmentName}" não encontrado (informe a empresa para criá-lo).`)
+          }
         }
+      }
+      const validRaw = cell('valid_until')
+      const validUntil = normalizeDate(validRaw)
+      if (validRaw && validUntil && !/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) {
+        warnings.push(`Linha ${r + 1}: validade "${validRaw}" não reconhecida (use dd/mm/aaaa); campo deixado em branco.`)
       }
       const extra: Record<string, string> = {}
       for (const ec of extraCols) {
@@ -318,7 +351,7 @@ personsRouter.post('/import', (req, res) => {
         cell('document') || null,
         cell('email') || null,
         cell('phone') || null,
-        normalizeDate(cell('valid_until')),
+        validUntil && /^\d{4}-\d{2}-\d{2}$/.test(validUntil) ? validUntil : null,
         JSON.stringify(extra),
       )
       imported++
@@ -328,5 +361,5 @@ personsRouter.post('/import', (req, res) => {
     db.exec('ROLLBACK')
     throw err
   }
-  res.json({ imported, createdDepartments, errors, extraColumns: extraCols.map((c) => c.name) })
+  res.json({ imported, createdDepartments, errors, warnings, extraColumns: extraCols.map((c) => c.name) })
 })

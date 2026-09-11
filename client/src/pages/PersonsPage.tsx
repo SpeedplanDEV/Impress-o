@@ -180,7 +180,7 @@ function PersonForm({ initial, companies, templates, onClose, onSaved }: {
           </div>
           <div className="stack">
             <div className="grid cols-2">
-              <label>Nome completo<input value={form.fullName} onChange={(e) => set('fullName', e.target.value)} required autoFocus /></label>
+              <label>Nome completo<input value={form.fullName} onChange={(e) => set('fullName', e.target.value)} required autoFocus maxLength={200} /></label>
               <label>Nome no cartão (opcional)<input value={form.displayName ?? ''} onChange={(e) => set('displayName', e.target.value)} placeholder="Ex.: nome abreviado" /></label>
               <label>Cargo / função<input value={form.roleTitle ?? ''} onChange={(e) => set('roleTitle', e.target.value)} /></label>
               <label>Matrícula<input value={form.registration ?? ''} onChange={(e) => set('registration', e.target.value)} /></label>
@@ -244,7 +244,7 @@ function ImportCsvModal({ companies, onClose, onDone }: { companies: { id: numbe
   const [csv, setCsv] = useState('')
   const [companyId, setCompanyId] = useState<number | null>(null)
   const [createDepartments, setCreateDepartments] = useState(true)
-  const [result, setResult] = useState<{ imported: number; createdDepartments: number; errors: string[]; extraColumns: string[] } | null>(null)
+  const [result, setResult] = useState<{ imported: number; createdDepartments: number; errors: string[]; warnings: string[]; extraColumns: string[] } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -288,7 +288,8 @@ function ImportCsvModal({ companies, onClose, onDone }: { companies: { id: numbe
       {result && (
         <div className="alert success">
           {result.imported} pessoa(s) importada(s); {result.createdDepartments} departamento(s) criado(s).
-          {result.extraColumns.length > 0 && <div className="small">Campos extras: {result.extraColumns.join(', ')}</div>}
+          {result.extraColumns.length > 0 && <div className="small">Campos extras (use no modelo): {result.extraColumns.map((c) => `{{${c}}}`).join(', ')}</div>}
+          {result.warnings.length > 0 && <ul className="small">{result.warnings.map((e, i) => <li key={i}>{e}</li>)}</ul>}
           {result.errors.length > 0 && <ul className="small">{result.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
         </div>
       )}

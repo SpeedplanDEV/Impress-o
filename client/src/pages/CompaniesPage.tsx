@@ -63,7 +63,7 @@ export default function CompaniesPage() {
                       <div className="row">
                         {c.logoUrl ? <img src={c.logoUrl} alt="" className="thumb" style={{ width: 40, height: 28 }} /> : <span className="thumb" style={{ width: 40, height: 28, display: 'inline-block' }} />}
                         <div>
-                          <div>{c.name}</div>
+                          <button className="btn ghost small" style={{ padding: 0, fontWeight: selectedId === c.id ? 600 : 400 }} onClick={(e) => { e.stopPropagation(); setSelectedId(c.id) }} aria-label={`Ver departamentos de ${c.name}`}>{c.name}</button>
                           {c.cnpj && <div className="small muted">{c.cnpj}</div>}
                         </div>
                       </div>
@@ -191,7 +191,7 @@ function CompanyForm({ initial, templates, onClose, onSaved }: { initial: Partia
             {logoPreview && <button type="button" className="btn small ghost" onClick={() => { setLogo(null); setLogoPreview(null) }}>Remover</button>}
           </div>
         </label>
-        <label>Observações<textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+        <label>Observações<textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} /></label>
         {error && <div className="alert error">{error}</div>}
         <div className="row end">
           <button type="button" className="btn" onClick={onClose}>Cancelar</button>

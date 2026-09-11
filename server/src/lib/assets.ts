@@ -37,7 +37,7 @@ export function parseDataUrl(dataUrl: string): { mime: string; buffer: Buffer } 
   const m = /^data:([\w/+.-]+);base64,([A-Za-z0-9+/=\s]+)$/.exec(dataUrl)
   if (!m) throw new HttpError(400, 'Imagem inválida (esperado data URL base64).')
   const mime = m[1].toLowerCase()
-  if (!MIME_EXT[mime]) throw new HttpError(400, `Tipo de imagem não suportado: ${mime}. Use PNG, JPEG, WebP, GIF ou SVG.`)
+  if (!Object.hasOwn(MIME_EXT, mime)) throw new HttpError(400, `Tipo de imagem não suportado: ${mime}. Use PNG, JPEG, WebP, GIF ou SVG.`)
   const buffer = Buffer.from(m[2].replace(/\s/g, ''), 'base64')
   if (buffer.length === 0) throw new HttpError(400, 'Imagem vazia.')
   if (buffer.length > MAX_ASSET_BYTES) throw new HttpError(413, 'Imagem muito grande (máximo 15 MB).')

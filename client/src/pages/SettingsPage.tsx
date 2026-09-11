@@ -211,6 +211,7 @@ function PrinterForm({ initial, onClose, onSaved }: { initial: Partial<Printer>;
                   </>
                 )}
                 <label className="inline"><input type="checkbox" checked={!!options.rotate180} onChange={(e) => setOptions({ ...options, rotate180: e.target.checked })} /> Girar a imagem 180° (se o cartão sair invertido)</label>
+                <label className="inline"><input type="checkbox" checked={!!options.duplexShortEdge} onChange={(e) => setOptions({ ...options, duplexShortEdge: e.target.checked })} /> Verso virado pela borda curta (se o verso sair de cabeça para baixo)</label>
                 <label className="inline"><input type="checkbox" checked={!!options.keepOutput} onChange={(e) => setOptions({ ...options, keepOutput: e.target.checked })} /> Guardar os PNGs enviados em "Saída de impressão" (auditoria)</label>
               </div>
             </fieldset>

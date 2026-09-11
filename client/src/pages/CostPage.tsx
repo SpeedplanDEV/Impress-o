@@ -77,7 +77,8 @@ export default function CostPage() {
                 </select>
               </label>
               <label>Kit de limpeza (R$)<input {...num('cleaningKitPrice')} /></label>
-              <label>Limpeza a cada N cartões<input {...num('cleaningIntervalCards')} /></label>
+              <label>Limpezas por kit (cartões/hastes no kit)<input {...num('cleaningCardsPerKit')} /></label>
+              <label>Fazer uma limpeza a cada N cartões impressos<input {...num('cleaningIntervalCards')} /></label>
               <label>Desperdício / reimpressão (%)<input {...num('wasteRatePercent')} /></label>
             </div>
             <p className="small muted" style={{ marginTop: 8 }}>Confira o rendimento nominal na embalagem da fita Entrust; os presets trazem os valores divulgados pelo fabricante e preços apenas sugeridos.</p>
@@ -100,7 +101,7 @@ export default function CostPage() {
               <label>Potência média da impressora (W)<input {...num('printerWatts')} /></label>
               <label>Segundos de impressão por face<input {...num('secondsPerSide')} /></label>
               <label>Custos indiretos (%)<input {...num('overheadPercent')} /></label>
-              <label>Margem de lucro (%)<input {...num('marginPercent')} /></label>
+              <label>Margem sobre o custo (markup, %)<input {...num('marginPercent')} /></label>
               <label>Impostos sobre a venda (%)<input {...num('taxPercent')} /></label>
             </div>
           </div>
@@ -142,7 +143,7 @@ export default function CostPage() {
                     <Row label="Custo direto" v={breakdown.directCost} bold />
                     <Row label="Custos indiretos" v={breakdown.overhead} />
                     <Row label="Custo total por cartão" v={breakdown.unitCost} bold />
-                    <Row label="Margem" v={breakdown.margin} />
+                    <Row label={`Margem sobre o custo (${Math.round((breakdown.margin / (breakdown.unitPrice || 1)) * 1000) / 10}% do preço)`} v={breakdown.margin} />
                     <Row label="Impostos" v={breakdown.tax} />
                     <Row label="Preço de venda por cartão" v={breakdown.unitPrice} bold />
                     <Row label="Receita do lote" v={breakdown.totalPrice} bold />
@@ -158,14 +159,14 @@ export default function CostPage() {
                 <div className="grid cols-3">
                   <div className="stat"><span className="muted small">Trabalhos</span><span className="value">{summary.data.totals.jobs}</span></div>
                   <div className="stat"><span className="muted small">Cartões</span><span className="value">{summary.data.totals.cards}</span></div>
-                  <div className="stat"><span className="muted small">Custo acumulado</span><span className="value">{brl.format(summary.data.totals.total_cost)}</span></div>
+                  <div className="stat"><span className="muted small">Custo acumulado</span><span className="value">{brl.format(summary.data.totals.totalCost)}</span></div>
                 </div>
                 {summary.data.byMonth.length > 0 && (
                   <table style={{ marginTop: 12 }}>
                     <thead><tr><th>Mês</th><th className="num">Trabalhos</th><th className="num">Cartões</th><th className="num">Custo</th></tr></thead>
                     <tbody>
                       {summary.data.byMonth.map((m) => (
-                        <tr key={m.month}><td>{m.month}</td><td className="num">{m.jobs}</td><td className="num">{m.cards}</td><td className="num">{brl.format(m.total_cost)}</td></tr>
+                        <tr key={m.month}><td>{m.month}</td><td className="num">{m.jobs}</td><td className="num">{m.cards}</td><td className="num">{brl.format(m.totalCost)}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -175,7 +176,7 @@ export default function CostPage() {
                     <thead><tr><th>Empresa</th><th className="num">Cartões</th><th className="num">Custo</th></tr></thead>
                     <tbody>
                       {summary.data.byCompany.map((c) => (
-                        <tr key={c.company}><td>{c.company}</td><td className="num">{c.cards}</td><td className="num">{brl.format(c.total_cost)}</td></tr>
+                        <tr key={c.company}><td>{c.company}</td><td className="num">{c.cards}</td><td className="num">{brl.format(c.totalCost)}</td></tr>
                       ))}
                     </tbody>
                   </table>

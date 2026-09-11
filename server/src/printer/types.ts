@@ -34,6 +34,8 @@ export interface PrinterOptions {
   cupsExtra?: string
   /** Girar a imagem 180° antes de enviar (ajuste de orientação de alimentação). */
   rotate180?: boolean
+  /** Duplex virando pela borda curta (padrão: borda longa). */
+  duplexShortEdge?: boolean
   /** Copiar o PNG gerado para uma pasta de saída além de imprimir (auditoria). */
   keepOutput?: boolean
 }

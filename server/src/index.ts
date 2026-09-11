@@ -5,7 +5,9 @@ import fs from 'node:fs'
 
 fs.mkdirSync(config.uploadsDir, { recursive: true })
 fs.mkdirSync(config.printOutputDir, { recursive: true })
-getDb()
+const db = getDb()
+// Trabalhos interrompidos por um reinício do servidor não podem ficar "imprimindo" para sempre
+db.prepare(`UPDATE print_jobs SET status = 'error', error = 'Interrompido: o servidor foi reiniciado durante a impressão.', finished_at = datetime('now') WHERE status IN ('queued', 'printing')`).run()
 
 const app = createApp()
 app.listen(config.port, config.host, () => {

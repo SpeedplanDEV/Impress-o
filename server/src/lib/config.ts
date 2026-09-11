@@ -5,9 +5,8 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 // Em desenvolvimento: <repo>/server/src/lib -> raiz = ../../..
 // Em produção (dist/server/src/lib) -> raiz = ../../../..
-const repoRoot = here.includes(`${path.sep}dist${path.sep}`)
-  ? path.resolve(here, '..', '..', '..', '..')
-  : path.resolve(here, '..', '..', '..')
+const compiled = /[\\/]dist[\\/]server[\\/]src[\\/]lib$/.test(here)
+const repoRoot = compiled ? path.resolve(here, '..', '..', '..', '..') : path.resolve(here, '..', '..', '..')
 
 const dataDir = process.env.IMPRESSO_DATA_DIR
   ? path.resolve(process.env.IMPRESSO_DATA_DIR)

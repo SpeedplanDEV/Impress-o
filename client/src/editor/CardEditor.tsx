@@ -52,6 +52,14 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   docRef.current = doc
   const sideRef = useRef(side)
   sideRef.current = side
+  const previewRef = useRef(preview)
+  previewRef.current = preview
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+  const sampleRef = useRef(sampleData)
+  sampleRef.current = sampleData
+  const loadToken = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
 
   const currentSide: CardSideDesign = side === 'back' && doc.back ? doc.back : doc.front
   const bump = () => forceRender((n) => n + 1)
@@ -60,7 +68,8 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   const commit = useCallback(
     (pushUndo = true) => {
       const canvas = canvasRef.current
-      if (!canvas || loadingRef.current) return
+      // Em modo de pré-visualização o canvas contém dados de exemplo: nunca gravar no modelo
+      if (!canvas || loadingRef.current || previewRef.current) return
       const fabric = serializeCanvas(canvas)
       const bg = typeof canvas.backgroundColor === 'string' ? canvas.backgroundColor : '#ffffff'
       const sideDesign: CardSideDesign = { fabric, backgroundColor: bg }
@@ -118,23 +127,29 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   const reload = useCallback(async () => {
     const canvas = canvasRef.current
     if (!canvas) return
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const token = ++loadToken.current
     loadingRef.current = true
     try {
       const d = docRef.current
       const s = sideRef.current === 'back' && d.back ? d.back : d.front
-      const w = await loadSideIntoCanvas(canvas, s, d, preview ? { data: sampleData ?? { fields: {} }, showPlaceholders: true } : {})
+      const isPreview = previewRef.current
+      const w = await loadSideIntoCanvas(canvas, s, d, isPreview ? { data: sampleRef.current ?? { fields: {} }, showPlaceholders: true, signal: controller.signal } : { signal: controller.signal })
+      if (token !== loadToken.current || (canvas as unknown as { disposed?: boolean }).disposed) return
       setWarnings(w)
-      for (const obj of canvas.getObjects()) decorate(obj, preview)
-      canvas.setZoom(zoom)
-      canvas.setDimensions({ width: d.width * zoom, height: d.height * zoom })
+      for (const obj of canvas.getObjects()) decorate(obj, isPreview)
+      const z = zoomRef.current
+      canvas.setZoom(z)
+      canvas.setDimensions({ width: d.width * z, height: d.height * z })
       canvas.discardActiveObject()
       setSelected(null)
       canvas.requestRenderAll()
     } finally {
-      loadingRef.current = false
+      if (token === loadToken.current) loadingRef.current = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preview, sampleData, zoom])
+  }, [])
 
   // Recarrega quando muda o lado, a pré-visualização ou o documento externo (id/orientação)
   useEffect(() => {
@@ -151,10 +166,13 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   }, [zoom, doc.width, doc.height])
 
   /* ---------------- Atalhos de teclado ---------------- */
+  const handlersRef = useRef({ undo: () => {}, redo: () => {}, removeSelected: () => {}, duplicateSelected: async () => {} })
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const canvas = canvasRef.current
       if (!canvas) return
+      if (previewRef.current) return
+      const { undo, redo, removeSelected, duplicateSelected } = handlersRef.current
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return
       const active = canvas.getActiveObject()
@@ -192,7 +210,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   /* ---------------- Ações ---------------- */
   function addObject(obj: FabricObject, meta?: Partial<ElementMeta>) {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas || previewRef.current) return
     if (meta) setMeta(obj, { elementId: newId(meta.role ?? 'el'), ...meta })
     else setMeta(obj, { role: 'static', elementId: newId('el') })
     decorate(obj, false)
@@ -243,6 +261,10 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   async function addImage(file: File) {
     const url = await fileToDataUrl(file)
     const img = await FabricImage.fromURL(url)
+    if (!img.width || !img.height) {
+      alert('Não foi possível ler as dimensões da imagem. Para SVG, garanta que o arquivo tenha width/height definidos ou converta para PNG.')
+      return
+    }
     const maxW = doc.width * 0.5
     const scale = Math.min(1, maxW / (img.width || 1))
     img.set({ originX: 'left', originY: 'top', left: 60, top: 60, scaleX: scale, scaleY: scale })
@@ -259,6 +281,10 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
     }
     const url = await fileToDataUrl(file)
     const img = await FabricImage.fromURL(url)
+    if (!img.width || !img.height) {
+      alert('Não foi possível ler as dimensões da imagem de fundo. Use PNG ou JPG.')
+      return
+    }
     const scale = Math.max(doc.width / (img.width || 1), doc.height / (img.height || 1))
     img.set({ originX: 'center', originY: 'center', left: doc.width / 2, top: doc.height / 2, scaleX: scale, scaleY: scale })
     canvas.backgroundImage = img
@@ -379,6 +405,8 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
     if (!on && side === 'back') setSide('front')
   }
 
+  handlersRef.current = { undo, redo, removeSelected, duplicateSelected }
+
   const sel = selected
   const selMeta = sel ? metaOf(sel) : null
   const isText = sel instanceof Textbox || sel instanceof IText
@@ -390,7 +418,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   return (
     <div className="editor">
       <div className="editor-toolbar">
-        <div className="btn-group">
+        <fieldset className="btn-group toolbar-group" disabled={preview} title={preview ? 'Desative a pré-visualização para editar' : undefined}>
           <button className="btn small" onClick={() => addText('name')} title="Nome da pessoa">+ Nome</button>
           <FieldAdder onAdd={(f) => addText('field', f)} />
           <button className="btn small" onClick={() => addText('static')}>+ Texto</button>
@@ -404,11 +432,11 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
             + Imagem
             <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void addImage(f); e.target.value = '' }} />
           </label>
-        </div>
+        </fieldset>
         <div className="btn-group">
-          <button className="btn small" onClick={undo} title="Desfazer (Ctrl+Z)">↶</button>
-          <button className="btn small" onClick={redo} title="Refazer (Ctrl+Y)">↷</button>
-          <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))} title="Zoom" style={{ width: 90 }}>
+          <button className="btn small" onClick={undo} title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={preview}>↶</button>
+          <button className="btn small" onClick={redo} title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled={preview}>↷</button>
+          <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))} title="Zoom" aria-label="Zoom" style={{ width: 90 }}>
             {zoomOptions.map((z) => (
               <option key={z} value={z}>{Math.round(z * 100)}%</option>
             ))}
@@ -449,7 +477,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
 
         <aside className="editor-panel">
           <h3>Fundo</h3>
-          <div className="row">
+          <div className="row" style={preview ? { opacity: 0.5, pointerEvents: 'none' } : undefined}>
             <label className="inline">
               Cor
               <input type="color" value={typeof canvasRef.current?.backgroundColor === 'string' ? canvasRef.current.backgroundColor : currentSide.backgroundColor} onChange={(e) => setBackgroundColor(e.target.value)} style={{ width: 48, padding: 2 }} />
@@ -461,7 +489,9 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
             <button className="btn small ghost" onClick={() => void setBackgroundImage(null)}>Remover imagem</button>
           </div>
           <hr />
-          {sel && selMeta ? (
+          {preview ? (
+            <div className="alert info small">Pré-visualização com dados de exemplo. Desative para editar os elementos.</div>
+          ) : sel && selMeta ? (
             <div className="stack">
               <h3>Elemento selecionado</h3>
               <label>
@@ -491,7 +521,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
                 </label>
               )}
               {selMeta.role === 'photo' && (
-                <button className="btn small" onClick={() => { const w = sel.getScaledWidth(); updateSelected({ scaleX: 1, scaleY: 1, width: w, height: Math.round((w * 4) / 3) }) }}>
+                <button className="btn small" onClick={() => { const w = Math.round((sel.width || 1) * sel.scaleX); updateSelected({ scaleX: 1, scaleY: 1, width: w, height: Math.round((w * 4) / 3) }) }}>
                   Ajustar proporção 3:4
                 </button>
               )}
@@ -529,9 +559,9 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
                     </label>
                   </div>
                   <div className="row">
-                    <button className={`btn small ${String((sel as Textbox).fontWeight) === 'bold' ? 'primary' : ''}`} onClick={() => updateSelected({ fontWeight: String((sel as Textbox).fontWeight) === 'bold' ? 'normal' : 'bold' })}><b>N</b></button>
-                    <button className={`btn small ${(sel as Textbox).fontStyle === 'italic' ? 'primary' : ''}`} onClick={() => updateSelected({ fontStyle: (sel as Textbox).fontStyle === 'italic' ? 'normal' : 'italic' })}><i>I</i></button>
-                    <button className={`btn small ${(sel as Textbox).underline ? 'primary' : ''}`} onClick={() => updateSelected({ underline: !(sel as Textbox).underline })}><u>S</u></button>
+                    <button className={`btn small ${String((sel as Textbox).fontWeight) === 'bold' ? 'primary' : ''}`} onClick={() => updateSelected({ fontWeight: String((sel as Textbox).fontWeight) === 'bold' ? 'normal' : 'bold' })} aria-label="Negrito" title="Negrito"><b>N</b></button>
+                    <button className={`btn small ${(sel as Textbox).fontStyle === 'italic' ? 'primary' : ''}`} onClick={() => updateSelected({ fontStyle: (sel as Textbox).fontStyle === 'italic' ? 'normal' : 'italic' })} aria-label="Itálico" title="Itálico"><i>I</i></button>
+                    <button className={`btn small ${(sel as Textbox).underline ? 'primary' : ''}`} onClick={() => updateSelected({ underline: !(sel as Textbox).underline })} aria-label="Sublinhado" title="Sublinhado"><u>S</u></button>
                     <select value={(sel as Textbox).textAlign} onChange={(e) => updateSelected({ textAlign: e.target.value })} style={{ width: 120 }}>
                       <option value="left">Esquerda</option>
                       <option value="center">Centro</option>
@@ -579,21 +609,21 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
                 </label>
                 <label>
                   Largura (mm)
-                  <input type="number" step={0.5} value={round1(pxToMm(sel.getScaledWidth()))} onChange={(e) => { const px = mmToPx(Number(e.target.value) || 1); updateSelected(isText ? { width: px } : { scaleX: px / (sel.width || 1) }) }} />
+                  <input type="number" step={0.5} value={round1(pxToMm((sel.width || 0) * sel.scaleX))} onChange={(e) => { const px = mmToPx(Number(e.target.value) || 1); updateSelected(isText ? { width: px } : { scaleX: px / (sel.width || 1) }) }} />
                 </label>
                 <label>
                   Altura (mm)
-                  <input type="number" step={0.5} value={round1(pxToMm(sel.getScaledHeight()))} onChange={(e) => { const px = mmToPx(Number(e.target.value) || 1); if (!isText) updateSelected({ scaleY: px / (sel.height || 1) }) }} disabled={isText} />
+                  <input type="number" step={0.5} value={round1(pxToMm((sel.height || 0) * sel.scaleY))} onChange={(e) => { const px = mmToPx(Number(e.target.value) || 1); if (!isText) updateSelected({ scaleY: px / (sel.height || 1) }) }} disabled={isText} />
                 </label>
               </div>
               <div className="row">
                 <span className="small muted">Alinhar:</span>
-                <button className="btn small" onClick={() => align('left')}>⇤</button>
-                <button className="btn small" onClick={() => align('hcenter')}>↔</button>
-                <button className="btn small" onClick={() => align('right')}>⇥</button>
-                <button className="btn small" onClick={() => align('top')}>⤒</button>
-                <button className="btn small" onClick={() => align('vcenter')}>↕</button>
-                <button className="btn small" onClick={() => align('bottom')}>⤓</button>
+                <button className="btn small" onClick={() => align('left')} aria-label="Alinhar à esquerda" title="Alinhar à esquerda">⇤</button>
+                <button className="btn small" onClick={() => align('hcenter')} aria-label="Centralizar horizontalmente" title="Centralizar horizontalmente">↔</button>
+                <button className="btn small" onClick={() => align('right')} aria-label="Alinhar à direita" title="Alinhar à direita">⇥</button>
+                <button className="btn small" onClick={() => align('top')} aria-label="Alinhar ao topo" title="Alinhar ao topo">⤒</button>
+                <button className="btn small" onClick={() => align('vcenter')} aria-label="Centralizar verticalmente" title="Centralizar verticalmente">↕</button>
+                <button className="btn small" onClick={() => align('bottom')} aria-label="Alinhar à base" title="Alinhar à base">⤓</button>
               </div>
               <div className="row">
                 <span className="small muted">Camada:</span>
@@ -617,7 +647,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
               const m = metaOf(o)
               const label = m.label || (o instanceof Textbox || o instanceof IText ? (o as Textbox).text.slice(0, 24) : o.type)
               return (
-                <button key={m.elementId ?? i} className={`layer ${o === sel ? 'active' : ''}`} onClick={() => { const c = canvasRef.current; if (!c) return; c.setActiveObject(o); c.requestRenderAll(); setSelected(o) }}>
+                <button key={m.elementId ?? i} className={`layer ${o === sel ? 'active' : ''}`} disabled={preview} onClick={() => { const c = canvasRef.current; if (!c) return; c.setActiveObject(o); c.requestRenderAll(); setSelected(o) }}>
                   <span className="badge">{ROLE_LABELS[m.role ?? 'static']}</span> {label}
                 </button>
               )
