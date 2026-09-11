@@ -6,3 +6,4 @@ data/*
 .DS_Store
 .env
 coverage/
+e2e/shots/
