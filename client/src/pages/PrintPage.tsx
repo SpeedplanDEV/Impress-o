@@ -5,7 +5,8 @@ import { useAsync } from '../lib/useAsync'
 import { renderCardForPrint } from '../editor/render'
 import { brl, formatDateTime } from '../lib/format'
 import { statusLabel } from './HomePage'
-import type { Person, PrintJob, TemplateFull } from '../lib/types'
+import PrinterForm from '../components/PrinterForm'
+import type { Person, PrintJob, Printer, PrinterStatus, TemplateFull } from '../lib/types'
 import type { CostBreakdown } from '@shared/cost'
 
 interface Rendered {
@@ -34,6 +35,8 @@ export default function PrintPage() {
   const [printing, setPrinting] = useState(false)
   const [log, setLog] = useState<{ kind: 'success' | 'error' | 'info'; text: string }[]>([])
   const [estimate, setEstimate] = useState<CostBreakdown | null>(null)
+  const [connecting, setConnecting] = useState<Partial<Printer> | null>(null)
+  const [printerStatus, setPrinterStatus] = useState<PrinterStatus | 'loading' | null>(null)
 
   const companies = useAsync(() => companiesApi.list())
   const departments = useAsync(() => departmentsApi.list(companyId), [companyId])
@@ -48,6 +51,33 @@ export default function PrintPage() {
       if (d) setPrinterId(d.id)
     }
   }, [printers.data, printerId])
+
+  const selectedPrinter = printers.data?.find((p) => p.id === printerId) ?? null
+
+  /** Verifica se a impressora selecionada está conectada (fila encontrada / rede respondendo). */
+  async function checkPrinter(id: number | null = printerId) {
+    if (!id) {
+      setPrinterStatus(null)
+      return
+    }
+    setPrinterStatus('loading')
+    try {
+      setPrinterStatus(await printersApi.status(id))
+    } catch (err) {
+      setPrinterStatus({ reachable: false, state: 'unknown', message: errorMessage(err) })
+    }
+  }
+  useEffect(() => {
+    void checkPrinter(printerId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printerId])
+
+  async function onPrinterConnected(p: Printer) {
+    setConnecting(null)
+    await printers.reload()
+    setPrinterId(p.id)
+    setLog((l) => [...l, { kind: 'success', text: `Impressora "${p.name}" conectada.` }])
+  }
 
   useEffect(() => {
     for (const p of persons.data ?? []) if (selected.has(p.id)) selectedMap.current.set(p.id, p)
@@ -117,10 +147,23 @@ export default function PrintPage() {
 
   async function printAll() {
     if (!printerId) {
-      setLog((l) => [...l, { kind: 'error', text: 'Configure uma impressora em Configurações antes de imprimir.' }])
+      setLog((l) => [...l, { kind: 'error', text: 'Conecte uma impressora antes de imprimir (botão "Conectar impressora").' }])
+      setConnecting({ adapter: 'system', model: 'Entrust Sigma DS' })
       return
     }
     setPrinting(true)
+    // Confere a conexão na hora de imprimir: evita mandar o lote para uma fila desligada
+    try {
+      const st = await printersApi.status(printerId)
+      setPrinterStatus(st)
+      if (st.state === 'offline') {
+        setLog((l) => [...l, { kind: 'error', text: `A impressora não está conectada: ${st.message} Ligue a impressora, confira o cabo/rede e clique em "Verificar".` }])
+        setPrinting(false)
+        return
+      }
+    } catch {
+      /* se a verificação falhar, tenta imprimir mesmo assim */
+    }
     let ok = 0
     for (const r of rendered) {
       try {
@@ -162,11 +205,27 @@ export default function PrintPage() {
         <div className="row">
           <label className="inline">
             Impressora
-            <select value={printerId ?? ''} onChange={(e) => setPrinterId(e.target.value ? Number(e.target.value) : null)} style={{ width: 240 }}>
-              {printers.data?.length === 0 && <option value="">Nenhuma configurada</option>}
+            <select value={printerId ?? ''} onChange={(e) => setPrinterId(e.target.value ? Number(e.target.value) : null)} style={{ width: 240 }} aria-label="Impressora">
+              {printers.data?.length === 0 && <option value="">Nenhuma conectada</option>}
               {printers.data?.map((p) => <option key={p.id} value={p.id}>{p.name}{p.adapter === 'mock' ? ' (simulada)' : ''}</option>)}
             </select>
           </label>
+          <button className={`btn ${printers.data?.length === 0 ? 'primary' : ''}`} onClick={() => setConnecting({ adapter: 'system', model: 'Entrust Sigma DS' })}>
+            🔌 Conectar impressora
+          </button>
+          {selectedPrinter && (
+            <span className="row" style={{ gap: 6 }}>
+              {printerStatus === 'loading' ? (
+                <span className="muted small">verificando…</span>
+              ) : printerStatus ? (
+                <span className={`badge ${printerStatus.state === 'ready' ? 'ok' : printerStatus.state === 'offline' ? 'err' : 'warn'}`} title={printerStatus.message}>
+                  {printerStatus.state === 'ready' ? 'conectada' : printerStatus.state === 'busy' ? 'ocupada' : printerStatus.state === 'offline' ? 'sem conexão' : 'não verificada'}
+                </span>
+              ) : null}
+              <button className="btn small ghost" onClick={() => void checkPrinter()} title="Verificar conexão com a impressora">Verificar</button>
+              <button className="btn small ghost" onClick={() => setConnecting(selectedPrinter)} title="Ajustar esta impressora">Ajustar</button>
+            </span>
+          )}
           <label className="inline">
             Cópias
             <input type="number" min={1} max={100} value={copies} onChange={(e) => setCopies(Math.min(100, Math.max(1, Number(e.target.value) || 1)))} style={{ width: 70 }} />
@@ -225,6 +284,22 @@ export default function PrintPage() {
 
         <div className="card">
           <h2>3. Conferir e imprimir</h2>
+          {printers.data && printers.data.length === 0 && (
+            <div className="alert warning">
+              <strong>Nenhuma impressora conectada neste computador.</strong>
+              <div className="small" style={{ margin: '6px 0 10px' }}>Conecte a Entrust Sigma DS (instale o driver oficial e ligue a impressora por USB ou rede) ou use a impressora simulada para testar sem hardware.</div>
+              <div className="btn-group">
+                <button className="btn primary" onClick={() => setConnecting({ adapter: 'system', model: 'Entrust Sigma DS' })}>🔌 Conectar Sigma DS</button>
+                <button className="btn" onClick={() => setConnecting({ adapter: 'mock', name: 'Impressora simulada (arquivo)' })}>Usar impressora simulada</button>
+              </div>
+            </div>
+          )}
+          {selectedPrinter && printerStatus && printerStatus !== 'loading' && printerStatus.state === 'offline' && (
+            <div className="alert error small">
+              A impressora "{selectedPrinter.name}" não respondeu: {printerStatus.message}{' '}
+              <button className="btn small" onClick={() => void checkPrinter()}>Verificar de novo</button>
+            </div>
+          )}
           {estimate && (
             <div className="alert info small">
               Custo estimado: <strong>{brl.format(estimate.unitCost)}</strong> por cartão × {estimate.quantity} = <strong>{brl.format(estimate.totalCost)}</strong> ({estimate.sides === 2 ? 'frente e verso' : 'só frente'}).
@@ -265,6 +340,10 @@ export default function PrintPage() {
           )}
         </div>
       </div>
+
+      {connecting && (
+        <PrinterForm initial={connecting} onClose={() => setConnecting(null)} onSaved={onPrinterConnected} />
+      )}
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="row between"><h2 style={{ margin: 0 }}>Histórico de impressões</h2><button className="btn small" onClick={() => void jobs.reload()}>Atualizar</button></div>

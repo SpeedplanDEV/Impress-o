@@ -2,7 +2,7 @@
 
 Percorre o fluxo completo no Chromium: configuração inicial → empresa com logo → departamento →
 modelo pronto no editor → exportar/importar modelo → vincular ao departamento → pessoa com foto 3x4 →
-impressora simulada → cartão de teste → pré-visualização 1013×638 → impressão → PDF → custo → login.
+conectar a impressora na tela de impressão → cartão de teste → pré-visualização 1013×638 → impressão → PDF → custo → login.
 
 ```bash
 npm run build

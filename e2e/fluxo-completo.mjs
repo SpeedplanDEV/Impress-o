@@ -162,14 +162,25 @@ try {
   await page.waitForSelector('td:has-text("Carlos Eduardo Pereira")')
   ok('pessoa cadastrada com foto', await page.isVisible('img.photo-3x4'))
 
-  // Impressora simulada
-  await page.click('nav >> text=Configurações')
-  await page.click('button:has-text("+ Simulada (teste)")')
+  // Conectar impressora direto na tela de impressão
+  await page.click('nav >> text=Impressão')
+  await page.waitForSelector('text=1. Escolha as pessoas')
+  ok('aviso de nenhuma impressora conectada', await page.isVisible('text=Nenhuma impressora conectada neste computador'))
+  await page.screenshot({ path: path.join(shots, '06a-sem-impressora.png') })
+  await page.click('button:has-text("Conectar Sigma DS")')
+  await page.waitForSelector('.modal')
+  ok('formulário de conexão lista as filas do sistema', await page.isVisible('.modal label:has-text("Fila de impressão no sistema")'))
+  // Sem driver neste ambiente: usa a impressora simulada pelo mesmo formulário
+  await page.selectOption('.modal label:has-text("Tipo") select', 'mock')
+  await page.fill('.modal label:has-text("Nome de exibição") input', 'Simulada')
   await page.click('.modal button:has-text("Salvar")')
+  await page.waitForSelector('.badge:has-text("conectada")', { timeout: 15000 })
+  ok('impressora conectada e verificada na tela de impressão', true)
+  await page.screenshot({ path: path.join(shots, '06b-conectar-impressora.png') })
+
+  // Cartão de teste nas configurações
+  await page.click('nav >> text=Configurações')
   await page.waitForSelector('span.badge:has-text("padrão")')
-  await page.click('button:has-text("Verificar")')
-  await page.waitForSelector('text=pronta')
-  ok('impressora simulada cadastrada e verificada', true)
   await page.click('button:has-text("Cartão de teste")')
   await page.waitForSelector('text=Simulação:', { timeout: 10000 })
   ok('cartão de teste enviado', true)

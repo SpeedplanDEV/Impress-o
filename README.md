@@ -123,11 +123,15 @@ persistir).
 
 ## Fluxo recomendado
 
-1. **Configurações → Impressoras**: adicione a *Entrust Sigma DS* escolhendo a fila do sistema
-   (as filas Entrust/Sigma aparecem marcadas com ★). Use **Verificar** para checar a fila e, se
-   informar o IP, a conectividade de rede (Printer Dashboard em `https://<ip>`). Use **Cartão de teste**
-   para imprimir um cartão com réguas e blocos de cor e conferir alinhamento/cores.
-   Sem impressora, cadastre uma **impressora simulada**: os cartões são gravados como PNG em
+1. **Conectar a impressora**: na tela **Impressão**, clique em **🔌 Conectar impressora** (ou
+   em **Conectar Sigma DS** no aviso que aparece enquanto nenhuma impressora está conectada) e
+   escolha a fila da *Entrust Sigma DS* no sistema (as filas Entrust/Sigma aparecem marcadas
+   com ★). O mesmo cadastro está em **Configurações → Impressoras**. A tela de impressão mostra
+   o estado da conexão (conectada / ocupada / sem conexão) e confere a impressora de novo na
+   hora de imprimir; **Verificar** checa a fila e, se informar o IP, a conectividade de rede
+   (Printer Dashboard em `https://<ip>`). Em Configurações, **Cartão de teste** imprime um
+   cartão com réguas e blocos de cor para conferir alinhamento/cores.
+   Sem impressora, use **Usar impressora simulada**: os cartões são gravados como PNG em
    `data/print-output/`.
 2. **Empresas e departamentos**: cadastre a empresa (com logo) e seus departamentos.
 3. **Modelos de cartão**: instale um modelo pronto, crie um em branco ou importe um `.json`.
