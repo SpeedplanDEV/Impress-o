@@ -19,6 +19,11 @@ async function main() {
   app.listen(config.port, config.host, () => {
     console.log(`Impress-o rodando em http://${config.host}:${config.port}`)
     console.log(`Dados em: ${config.dataDir}`)
+    if (config.lanEnabled) {
+      for (const url of config.lanUrls) console.log(`Acesso pelo celular (mesma rede Wi-Fi): ${url}`)
+    } else {
+      console.log('Para acessar pelo celular, defina HOST=0.0.0.0 no arquivo .env (veja Configurações > Acesso pelo celular).')
+    }
   })
 }
 

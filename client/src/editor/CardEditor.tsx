@@ -41,7 +41,16 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
   const canvasElRef = useRef<HTMLCanvasElement | null>(null)
   const canvasRef = useRef<Canvas | null>(null)
   const [side, setSide] = useState<Side>('front')
-  const [zoom, setZoom] = useState(0.6)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const [zoom, setZoom] = useState(() => {
+    // Em telas estreitas, começa com o cartão inteiro visível
+    if (typeof window !== 'undefined' && window.innerWidth < 900) return Math.max(0.2, Math.min(1, Math.floor(((window.innerWidth - 60) / doc.width) * 100) / 100))
+    return 0.6
+  })
+  function fitZoom() {
+    const w = stageRef.current?.clientWidth ?? window.innerWidth
+    setZoom(Math.max(0.1, Math.floor(((w - 24) / doc.width) * 100) / 100))
+  }
   const [selected, setSelected] = useState<FabricObject | null>(null)
   const [, forceRender] = useState(0)
   const [preview, setPreview] = useState(false)
@@ -455,11 +464,13 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
         <div className="btn-group">
           <button className="btn small" onClick={undo} title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={preview}>↶</button>
           <button className="btn small" onClick={redo} title="Refazer (Ctrl+Y)" aria-label="Refazer" disabled={preview}>↷</button>
-          <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))} title="Zoom" aria-label="Zoom" style={{ width: 90 }}>
+          <select value={zoomOptions.includes(zoom) ? zoom : ''} onChange={(e) => { if (e.target.value) setZoom(Number(e.target.value)) }} title="Zoom" aria-label="Zoom" style={{ width: 90 }}>
+            {!zoomOptions.includes(zoom) && <option value="">{Math.round(zoom * 100)}%</option>}
             {zoomOptions.map((z) => (
               <option key={z} value={z}>{Math.round(z * 100)}%</option>
             ))}
           </select>
+          <button className="btn small" onClick={fitZoom} title="Ajustar o cartão à largura da tela">Ajustar</button>
           <label className="inline small">
             <input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} /> Pré-visualizar com dados de exemplo
           </label>
@@ -480,7 +491,7 @@ export default function CardEditor({ doc, onChange, sampleData }: Props) {
               CR80 {CR80.widthMm} × {CR80.heightMm} mm · {doc.width} × {doc.height} px a 300 dpi
             </div>
           </div>
-          <div className="editor-stage">
+          <div className="editor-stage" ref={stageRef}>
             <div className="editor-card" style={{ width: doc.width * zoom, height: doc.height * zoom }}>
               <canvas ref={canvasElRef} />
               <div className="safe-area" style={{ inset: safeMarginPx * zoom }} title="Margem de segurança (2 mm)" />

@@ -7,10 +7,12 @@ interface Props {
   className?: string
   title?: string
   disabled?: boolean
+  /** No celular, abre a câmera diretamente ('user' = frontal, 'environment' = traseira). */
+  capture?: 'user' | 'environment'
 }
 
 /** Botão de escolha de arquivo acessível por teclado (o input fica oculto visualmente, mas focável). */
-export default function FilePicker({ accept, onFile, children, className = 'btn small', title, disabled }: Props) {
+export default function FilePicker({ accept, onFile, children, className = 'btn small', title, disabled, capture }: Props) {
   const ref = useRef<HTMLInputElement | null>(null)
   const id = useId()
   return (
@@ -23,6 +25,7 @@ export default function FilePicker({ accept, onFile, children, className = 'btn 
         ref={ref}
         type="file"
         accept={accept}
+        capture={capture}
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"

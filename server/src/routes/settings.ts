@@ -33,6 +33,7 @@ settingsRouter.get('/', async (_req, res) => {
     paths: { dataDir: config.dataDir, dbPath: config.dbPath, uploadsDir: config.uploadsDir, printOutputDir: config.printOutputDir },
     database,
     instance: { id: config.instanceId, name: config.instanceName },
+    lan: { enabled: config.lanEnabled, urls: config.lanUrls, port: config.port },
     platform: process.platform,
     nodeVersion: process.version,
     counts,

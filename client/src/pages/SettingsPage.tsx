@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import QRCode from 'qrcode'
 import { api, authApi, printersApi, settingsApi } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
 import Modal from '../components/Modal'
@@ -92,6 +93,8 @@ export default function SettingsPage({ onAccountChanged }: { onAccountChanged: (
         )}
       </div>
 
+      <MobileAccessCard lan={info.data?.lan ?? null} />
+
       <AccountCard onAccountChanged={onAccountChanged} />
 
       <div className="card">
@@ -118,6 +121,54 @@ export default function SettingsPage({ onAccountChanged }: { onAccountChanged: (
 
       {editing && (
         <PrinterForm initial={editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await printers.reload() }} />
+      )}
+    </div>
+  )
+}
+
+function MobileAccessCard({ lan }: { lan: { enabled: boolean; urls: string[]; port: number } | null }) {
+  const [qrs, setQrs] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!lan?.enabled) return
+    let cancelled = false
+    ;(async () => {
+      const out: Record<string, string> = {}
+      for (const url of lan.urls) out[url] = await QRCode.toDataURL(url, { margin: 1, width: 160 })
+      if (!cancelled) setQrs(out)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [lan?.enabled, lan?.urls.join(',')])
+
+  return (
+    <div className="card">
+      <h2>Acesso pelo celular ou tablet</h2>
+      {lan?.enabled ? (
+        lan.urls.length > 0 ? (
+          <>
+            <p className="small muted">Conecte o celular na mesma rede Wi-Fi e abra um destes endereços (ou leia o QR code). A tela se adapta ao celular; a foto 3x4 pode ser tirada com a câmera do aparelho.</p>
+            <div className="row" style={{ alignItems: 'flex-start', gap: 20 }}>
+              {lan.urls.map((url) => (
+                <div key={url} className="stack" style={{ alignItems: 'center' }}>
+                  {qrs[url] && <img src={qrs[url]} alt={`QR code para ${url}`} width={160} height={160} />}
+                  <a href={url} className="mono">{url}</a>
+                </div>
+              ))}
+            </div>
+            <p className="small muted" style={{ marginTop: 8 }}>Dica: no celular, use "Adicionar à tela inicial" para abrir o Impress-o como um aplicativo.</p>
+          </>
+        ) : (
+          <div className="alert warning small">O servidor aceita conexões da rede, mas nenhuma rede local foi encontrada neste computador.</div>
+        )
+      ) : (
+        <>
+          <p className="small muted">
+            Hoje o sistema aceita conexões só deste computador. Para usar pelo celular na mesma rede Wi-Fi, crie (ou edite) o arquivo <code>.env</code> na pasta do sistema com a linha abaixo e reinicie o Impress-o. O endereço e o QR code aparecerão aqui.
+          </p>
+          <pre className="mono">HOST=0.0.0.0</pre>
+          <p className="small muted">A impressora continua sendo a deste computador; o celular só usa a tela (cadastro de pessoas com foto, modelos, envio para impressão).</p>
+        </>
       )}
     </div>
   )

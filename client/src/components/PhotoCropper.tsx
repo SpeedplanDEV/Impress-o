@@ -27,6 +27,9 @@ export default function PhotoCropper({ onDone, onClose }: Props) {
   const [error, setError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  // getUserMedia só existe em contexto seguro (localhost ou HTTPS); no celular pela rede local usa-se a câmera do sistema.
+  const webcamAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
+  const isTouchDevice = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
 
   useEffect(() => {
     if (!camera) return
@@ -106,7 +109,12 @@ export default function PhotoCropper({ onDone, onClose }: Props) {
     }>
       <div className="row" style={{ marginBottom: 10 }}>
         <FilePicker className="btn" accept="image/*" onFile={(f) => void onFile(f)}>Escolher arquivo…</FilePicker>
-        <button className="btn" onClick={() => { setError(null); setCamera((c) => !c) }}>{camera ? 'Fechar câmera' : 'Usar webcam'}</button>
+        {isTouchDevice && (
+          <FilePicker className="btn" accept="image/*" capture="user" onFile={(f) => void onFile(f)}>📷 Tirar foto</FilePicker>
+        )}
+        {webcamAvailable && !isTouchDevice && (
+          <button className="btn" onClick={() => { setError(null); setCamera((c) => !c) }}>{camera ? 'Fechar câmera' : 'Usar webcam'}</button>
+        )}
         <span className="muted small">Arraste para posicionar; a proporção 3:4 (30 × 40 mm) é mantida automaticamente.</span>
       </div>
       {error && <div className="alert error">{error}</div>}

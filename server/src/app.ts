@@ -1,7 +1,8 @@
 import express, { type Request, type Response, type NextFunction } from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
-import { config } from './lib/config.js'
+import { config, lanAddresses } from './lib/config.js'
+import os from 'node:os'
 import { requireAuth } from './lib/auth.js'
 import { authRouter } from './routes/auth.js'
 import { apiRouter } from './routes/index.js'
@@ -10,6 +11,12 @@ import { apiRouter } from './routes/index.js'
 function allowedHostnames(): Set<string> {
   const set = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
   if (config.host && config.host !== '0.0.0.0' && config.host !== '::') set.add(config.host)
+  if (config.lanEnabled) {
+    // Acesso pelo celular na rede local: aceita os IPs desta máquina e o nome dela
+    for (const ip of lanAddresses()) set.add(ip)
+    set.add(os.hostname().toLowerCase())
+    set.add(`${os.hostname().toLowerCase()}.local`)
+  }
   for (const h of (process.env.IMPRESSO_ALLOWED_HOSTS ?? '').split(',').map((x) => x.trim()).filter(Boolean)) set.add(h.toLowerCase())
   return set
 }

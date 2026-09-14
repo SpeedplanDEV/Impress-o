@@ -11,3 +11,7 @@ node e2e/fluxo-completo.mjs        # ou CHROME_PATH=/caminho/do/chrome node e2e/
 ```
 
 As capturas de tela ficam em `e2e/shots/`. O teste usa uma pasta de dados temporária e a porta 3099.
+
+Versão para celular (Chromium emulando um telefone com toque): `node e2e/fluxo-celular.mjs` — cobre o
+menu em gaveta, o cadastro com foto pela câmera, o editor ajustado à tela, a impressão e a página de
+acesso pelo celular. Capturas em `e2e/shots-mobile/`.

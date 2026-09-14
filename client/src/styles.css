@@ -116,10 +116,52 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 .template-card img { width: 100%; aspect-ratio: 85.6 / 54; object-fit: contain; background: #f1f4f8; border-radius: 4px; }
 .template-card.portrait img { aspect-ratio: 54 / 85.6; }
 .empty { padding: 30px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: var(--radius); }
+/* ---------------- Barra superior e gaveta (celular) ---------------- */
+.topbar { display: none; }
+.sidebar-close { display: none; }
+.nav-icon { display: inline-block; width: 22px; text-align: center; margin-right: 4px; opacity: 0.8; }
+.drawer-backdrop { display: none; }
+
 @media (max-width: 900px) {
   .shell { flex-direction: column; }
-  .sidebar { width: auto; flex: none; height: auto; position: static; }
+  .topbar {
+    display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 40;
+    background: var(--panel); border-bottom: 1px solid var(--border); padding: 8px 12px; min-height: 52px;
+  }
+  .topbar-menu { font-size: 20px; padding: 6px 10px; }
+  .topbar-brand { font-size: 17px; }
+  .topbar-title { margin-left: auto; color: var(--muted); font-size: 13px; text-align: right; }
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 86vw); height: 100vh; z-index: 60;
+    transform: translateX(-105%); transition: transform 0.2s ease; box-shadow: 0 0 30px rgba(0,0,0,0.25); overflow: auto;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-close { display: inline-flex; }
+  .drawer-backdrop { display: block; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 50; }
+  .content { padding: 14px 14px 28px; }
   .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
+  .page-header { flex-direction: column; align-items: stretch; }
+  .page-header .btn-group, .page-header .row { width: 100%; }
+  .page-header .btn-group .btn, .page-header .row .btn { flex: 1 1 auto; justify-content: center; }
+  h1 { font-size: 20px; }
+  /* Toque: alvos maiores e sem zoom automático do iOS nos campos */
+  .btn { min-height: 40px; }
+  input, select, textarea { font-size: 16px; min-height: 40px; }
+  /* Tabelas rolam na horizontal em vez de estourar a tela */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+  table thead, table tbody { display: table; width: 100%; }
+  th, td { padding: 8px 8px; }
+  .btn-group { flex-wrap: wrap; }
+  .modal-backdrop { padding: 0; align-items: stretch; }
+  .modal { max-width: none; width: 100%; max-height: none; height: 100%; border-radius: 0; padding: 16px; }
+  .auth-card { max-width: none; }
+  .template-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .card-preview { width: 100% !important; }
+  .kv { grid-template-columns: 1fr; gap: 2px 0; }
+  .kv dt { margin-top: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar { transition: none; }
 }
 
 /* ---------------- Editor ---------------- */
@@ -138,6 +180,14 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 .layer.active { border-color: var(--primary); background: #eaf2fb; }
 .cropper-area { position: relative; width: 100%; height: 380px; background: #222; border-radius: 6px; overflow: hidden; }
 @media (max-width: 1100px) { .editor-body { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .editor-toolbar { position: sticky; top: 52px; z-index: 30; }
+  .editor-toolbar .toolbar-group { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; padding-bottom: 4px; }
+  .editor-toolbar .toolbar-group .btn, .editor-toolbar .toolbar-group select { flex: 0 0 auto; }
+  .editor-stage { padding: 10px; max-height: none; }
+  .editor-panel { max-height: none; }
+  .cropper-area { height: 60vh; }
+}
 
 fieldset.toolbar-group { border: 0; padding: 0; margin: 0; }
 fieldset.toolbar-group:disabled { opacity: 0.5; }

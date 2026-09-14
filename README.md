@@ -91,6 +91,17 @@ Observações:
   começa vazio).
 - Os testes automatizados rodam a mesma suíte de API nos dois bancos (SQLite e Postgres em memória).
 
+## Uso no celular ou tablet
+
+A interface se adapta a telas pequenas (menu em gaveta, formulários em tela cheia, editor com
+"Ajustar" à largura da tela, foto 3x4 tirada com a câmera do aparelho) e pode ser instalada como
+aplicativo ("Adicionar à tela inicial").
+
+Para acessar pelo celular na mesma rede Wi-Fi, defina `HOST=0.0.0.0` no arquivo `.env` e reinicie:
+o endereço e um QR code aparecem em **Configurações → Acesso pelo celular** e no terminal. A
+impressora continua sendo a do computador que roda o sistema; o celular usa só a tela (cadastros,
+modelos e envio para impressão).
+
 ## Fluxo recomendado
 
 1. **Configurações → Impressoras**: adicione a *Entrust Sigma DS* escolhendo a fila do sistema

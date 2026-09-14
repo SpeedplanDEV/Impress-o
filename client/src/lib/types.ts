@@ -156,6 +156,7 @@ export interface AppInfo {
   paths: { dataDir: string; dbPath: string; uploadsDir: string; printOutputDir: string }
   database: { kind: 'sqlite' | 'postgres' | 'pglite'; target: string }
   instance: { id: string; name: string }
+  lan: { enabled: boolean; urls: string[]; port: number }
   platform: string
   nodeVersion: string
   counts: { companies: number; departments: number; persons: number; templates: number; printers: number; jobs: number; jobsDone: number; cardsPrinted: number; totalCost: number }

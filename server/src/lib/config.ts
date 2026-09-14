@@ -37,6 +37,17 @@ function loadInstanceId(): string {
   return id
 }
 
+/** Endereços IPv4 locais (rede do escritório) para acesso pelo celular. */
+export function lanAddresses(): string[] {
+  const out: string[] = []
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const i of list ?? []) {
+      if (i.family === 'IPv4' && !i.internal) out.push(i.address)
+    }
+  }
+  return out
+}
+
 export const config = {
   repoRoot,
   dataDir,
@@ -50,6 +61,15 @@ export const config = {
   clientDist: path.join(repoRoot, 'dist', 'client'),
   port: Number(process.env.PORT ?? 3070),
   host: process.env.HOST ?? '127.0.0.1',
+  /** true quando o servidor aceita conexões da rede local (HOST=0.0.0.0), para acesso pelo celular. */
+  get lanEnabled(): boolean {
+    return this.host === '0.0.0.0' || this.host === '::'
+  },
+  /** URLs para abrir no celular (mesma rede Wi-Fi). */
+  get lanUrls(): string[] {
+    if (!this.lanEnabled) return []
+    return lanAddresses().map((ip) => `http://${ip}:${this.port}`)
+  },
   sessionTtlHours: 24 * 7,
   /** Marca o cookie de sessão como Secure (use quando o sistema estiver atrás de HTTPS). */
   secureCookies: process.env.IMPRESSO_SECURE_COOKIES === '1',
