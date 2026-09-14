@@ -37,6 +37,16 @@ function hostnameOf(value: string | undefined): string | null {
   }
 }
 
+/** Página mostrada quando o servidor sobe sem a interface compilada (dist/client). */
+function paginaNaoCompilada(): string {
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Impress-o</title>
+<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:48px auto;padding:0 16px;color:#1f2933;line-height:1.5}code{background:#eef2f7;padding:2px 6px;border-radius:4px}</style></head>
+<body><h1>Impress-o: API ativa, interface ainda não compilada</h1>
+<p>O servidor está no ar, mas a pasta <code>dist/client</code> não foi gerada ou ficou incompleta.</p>
+<ol><li>Feche a janela do servidor.</li><li>Execute <code>iniciar.bat</code> (Windows) ou <code>./iniciar.sh</code>: ele compila e inicia de novo. Ou rode <code>npm run build</code> e depois <code>npm start</code>.</li></ol>
+<p>Em desenvolvimento (<code>npm run dev</code>), a interface fica em <a href="http://localhost:5173">http://localhost:5173</a>.</p></body></html>`
+}
+
 export function createApp() {
   const app = express()
   app.disable('x-powered-by')
@@ -69,26 +79,26 @@ export function createApp() {
     res.status(404).json({ error: 'Rota não encontrada.' })
   })
 
-  // Cliente compilado (produção)
-  if (fs.existsSync(config.clientDist)) {
+  // Cliente compilado (produção): exige o index.html, não só a pasta (um build interrompido deixa a pasta vazia)
+  const indexHtml = path.join(config.clientDist, 'index.html')
+  if (fs.existsSync(indexHtml)) {
     app.use(express.static(config.clientDist, { index: false, maxAge: '1h' }))
     app.get('/{*splat}', (_req, res) => {
-      res.sendFile(path.join(config.clientDist, 'index.html'))
+      res.sendFile(indexHtml)
     })
   } else {
-    app.get('/', (_req, res) => {
-      res
-        .type('text/plain')
-        .send('Impress-o API ativa. Em desenvolvimento use "npm run dev" (Vite em http://localhost:5173). Em produção rode "npm run build" antes.')
+    app.get('/{*splat}', (_req, res) => {
+      res.status(503).type('html').send(paginaNaoCompilada())
     })
   }
 
-  // Tratamento de erros: nunca vaza stack para o cliente
+  // Tratamento de erros: nunca vaza stack nem caminhos do disco para o cliente
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    const message = err instanceof Error ? err.message : 'Erro interno.'
+    const code = (err as { code?: string })?.code
     const status = (err as { status?: number })?.status ?? (err as { statusCode?: number })?.statusCode ?? 500
     if (status >= 500) console.error(err)
-    res.status(status).json({ error: status >= 500 ? 'Erro interno do servidor.' : message })
+    const message = status >= 500 ? 'Erro interno do servidor.' : code === 'ENOENT' ? 'Arquivo não encontrado.' : err instanceof Error ? err.message : 'Erro.'
+    res.status(status).json({ error: message })
   })
 
   return app

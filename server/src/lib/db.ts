@@ -437,7 +437,13 @@ class SqliteDb implements Db {
 async function openSqlite(file: string): Promise<Db> {
   const { DatabaseSync } = await import('node:sqlite')
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true })
-  const conn = new DatabaseSync(file)
+  let conn: import('node:sqlite').DatabaseSync
+  try {
+    conn = new DatabaseSync(file)
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    throw Object.assign(new Error(`Não foi possível abrir o banco de dados local (${file}): ${e.message}`), { code: e.code ?? 'ERR_SQLITE_ERROR' })
+  }
   conn.exec('PRAGMA journal_mode = WAL')
   conn.exec('PRAGMA foreign_keys = ON')
   conn.exec('PRAGMA busy_timeout = 5000')
@@ -546,7 +552,12 @@ class PgBaseDb implements Db {
  *    IMPRESSO_DB_SSL=verify a cadeia é validada.
  */
 export function prepareDatabaseUrl(url: string, env: NodeJS.ProcessEnv = process.env): { connectionString: string; ssl: false | { rejectUnauthorized: boolean } } {
-  const u = new URL(url)
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    throw Object.assign(new Error('DATABASE_URL inválida (Invalid URL).'), { code: 'ERR_INVALID_URL' })
+  }
   const sslmode = u.searchParams.get('sslmode')
   u.searchParams.delete('sslmode')
   u.searchParams.delete('uselibpqcompat')
@@ -561,6 +572,9 @@ async function openPostgres(url: string): Promise<Db> {
   pg.types.setTypeParser(20, (v: string) => Number(v))
   pg.types.setTypeParser(1700, (v: string) => Number(v))
   const { connectionString, ssl } = prepareDatabaseUrl(url)
+  if (new URL(connectionString).port === '6543') {
+    console.warn('Aviso: a DATABASE_URL usa a porta 6543 ("Transaction pooler"), que não mantém o esquema entre consultas. Prefira o modo "Session pooler" (porta 5432) do Supabase.')
+  }
   // Ajustes para banco remoto: poucas conexões (o pooler gratuito do Supabase
   // limita ~15 por banco), conexões ociosas mantidas por alguns minutos com
   // keepalive (evita handshake TLS a cada requisição) e tempo máximo por consulta.
@@ -608,7 +622,13 @@ async function openPostgres(url: string): Promise<Db> {
   db.close = async () => {
     await pool.end()
   }
-  await db.get('SELECT 1 AS ok')
+  // Primeira conexão sem repetição: um banco inalcançável falha em uma tentativa (15 s), não em duas
+  try {
+    await pool.query('SELECT 1 AS ok')
+  } catch (err) {
+    await pool.end().catch(() => undefined)
+    throw err
+  }
   return db
 }
 

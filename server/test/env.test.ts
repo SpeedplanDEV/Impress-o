@@ -19,7 +19,8 @@ describe('.env', () => {
   it('é lido antes da configuração (PORT e IMPRESSO_DATA_DIR vêm do arquivo)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'impresso-env-'))
     const port = await freePort()
-    fs.writeFileSync(path.join(dir, '.env'), `PORT=${port}\nIMPRESSO_DATA_DIR=${path.join(dir, 'dados')}\n`)
+    // Com BOM UTF-8 no início (como o Bloco de Notas grava) e uma linha em branco: ambos devem ser tolerados
+    fs.writeFileSync(path.join(dir, '.env'), `\uFEFFPORT=${port}\n\nIMPRESSO_DATA_DIR=${path.join(dir, 'dados')}\n`)
     const env = { ...process.env }
     delete env.PORT
     delete env.IMPRESSO_DATA_DIR

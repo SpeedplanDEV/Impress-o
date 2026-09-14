@@ -165,7 +165,9 @@ try {
   // Conectar impressora direto na tela de impressão
   await page.click('nav >> text=Impressão')
   await page.waitForSelector('text=1. Escolha as pessoas')
-  ok('aviso de nenhuma impressora conectada', await page.isVisible('text=Nenhuma impressora conectada neste computador'))
+  // A lista de impressoras carrega de forma assíncrona: espera o aviso aparecer em vez de checar na hora
+  await page.waitForSelector('text=Nenhuma impressora conectada neste computador', { timeout: 15000 })
+  ok('aviso de nenhuma impressora conectada', true)
   await page.screenshot({ path: path.join(shots, '06a-sem-impressora.png') })
   await page.click('button:has-text("Conectar Sigma DS")')
   await page.waitForSelector('.modal')

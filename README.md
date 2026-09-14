@@ -64,16 +64,24 @@ Verificação de tipos: `npm run typecheck`. Teste ponta a ponta em navegador re
 
 ### Não abre em http://localhost:3070?
 
-Olhe a janela preta do `iniciar.bat` (ou o terminal): a causa aparece lá.
+Olhe a janela preta do `iniciar.bat` (ou o terminal): a causa aparece lá, em português, e a janela
+não fecha sozinha. Teste rápido no Prompt de Comando: `curl.exe http://127.0.0.1:3070/api/auth/status`
+deve responder um texto com `setupDone`; se responder, o sistema está no ar e o problema é do navegador.
 
 | O que aparece | O que fazer |
 |---|---|
+| Nada acontece ao dar dois cliques, ou "O Windows protegeu o computador" | Clique em **Mais informações → Executar assim mesmo**, ou botão direito em `iniciar.bat` → Propriedades → **Desbloquear**. No PowerShell, digite `.\iniciar.bat`. |
+| "Esta pasta esta incompleta" | O ZIP não foi extraído: botão direito → **Extrair tudo...** para uma pasta fixa (ex.: `C:\Impress-o`) e execute de lá. |
 | "Node.js nao encontrado" | Instale o Node.js LTS (<https://nodejs.org>) e execute `iniciar.bat` de novo. |
-| "A versão do Node.js instalada (...) é antiga demais" ou "No such built-in module: node:sqlite" | Instale o Node.js LTS por cima da versão antiga (precisa ser 22.13 ou mais nova). |
-| "A porta 3070 já está em uso" | O Impress-o já está aberto em outra janela: use essa janela, ou feche-a e inicie de novo. |
-| "npm install" falhou / sem internet | A primeira execução baixa as dependências; conecte à internet (ou configure o proxy da rede no npm) e tente de novo. |
-| A janela fecha sozinha na hora | Abra o **Prompt de Comando** na pasta do sistema e digite `iniciar.bat` para ler a mensagem. |
-| "Impress-o rodando em http://localhost:3070", mas o navegador diz que não conseguiu acessar | Recarregue a página (F5) ou digite o endereço manualmente. Confira se está no mesmo computador em que o sistema foi iniciado. |
+| "A versão do Node.js instalada (...) é antiga demais" | Instale o Node.js LTS por cima (precisa ser 22.13 ou mais nova; 22.11/22.12 não servem). Se continuar, feche tudo e abra de novo ou reinicie: `where node` mostra qual versão o Windows está usando. |
+| "npm install" falhou | A primeira execução baixa as dependências: conecte à internet (ou configure o proxy da rede no npm), apague a pasta `node_modules` e tente de novo. Mantenha a pasta fora do OneDrive. |
+| "O Impress-o já está aberto neste computador em ..." | Já existe uma janela do sistema rodando: use-a (o navegador é aberto nela). |
+| "A porta 3070 está ocupada ou reservada (...); tentando a porta 3071" | Normal: outro programa usa a 3070 e o sistema escolheu a próxima porta livre; o navegador abre no endereço certo. Com `PORT=` fixo no `.env`, troque para outra porta (o Hyper-V/WSL reserva faixas: `netsh interface ipv4 show excludedportrange protocol=tcp`). |
+| "Sem permissão para gravar na pasta de dados" | Mova a pasta para `C:\Impress-o` (fora de Arquivos de Programas, pastas de rede e OneDrive) ou defina `IMPRESSO_DATA_DIR=C:\Impress-o-dados` no `.env`. |
+| "Não foi possível alcançar o banco na nuvem" | Confira a internet e a `DATABASE_URL`; no Supabase use o modo **Session pooler** (porta 5432, funciona em IPv4). Sem banco na nuvem, apague a linha `DATABASE_URL` para usar o SQLite local. |
+| "DATABASE_URL inválida" | A senha tem símbolos (`#`, `?`, `/`, `@`, `%`): codifique-os (`#` vira `%23`) ou troque por uma senha só com letras e números. |
+| "Impress-o rodando em http://localhost:3070", mas o navegador diz que não conseguiu acessar | Recarregue a página (F5) ou digite o endereço com `http://` na frente (não `https://`). Tente também `http://127.0.0.1:3070`. Confira se está no mesmo computador em que o sistema foi iniciado. |
+| A página diz "interface ainda não compilada" | Feche a janela e execute `iniciar.bat` (ou `npm run build`) de novo; o build anterior ficou incompleto. |
 | Quer abrir de outro computador ou do celular | Veja [Uso no celular ou tablet](#uso-no-celular-ou-tablet) (`HOST=0.0.0.0`) ou publique na internet. |
 
 Ao atualizar o sistema (novo ZIP ou `git pull`), execute `iniciar.bat` de novo: ele recompila

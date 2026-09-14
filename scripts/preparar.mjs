@@ -15,6 +15,10 @@ import { fileURLToPath } from 'node:url'
 const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MINIMO = '22.13.0'
 const win = process.platform === 'win32'
+const args = new Set(process.argv.slice(2))
+/** --iniciar: depois de preparar, inicia o servidor (sem depender do npm no PATH); --navegador: abre o navegador quando pronto. */
+const iniciar = args.has('--iniciar')
+const navegador = args.has('--navegador')
 
 function partes(v) {
   return String(v).replace(/^v/, '').split('.').map((x) => Number.parseInt(x, 10) || 0)
@@ -31,8 +35,10 @@ function versaoOk(versao, minimo) {
 if (!versaoOk(process.versions.node, MINIMO)) {
   console.error('')
   console.error(`A versão do Node.js instalada (${process.version}) é antiga demais para o Impress-o.`)
-  console.error(`É necessário o Node.js ${MINIMO} ou superior (a versão LTS atual serve).`)
-  console.error('Baixe em https://nodejs.org, instale (pode instalar por cima) e execute este arquivo de novo.')
+  console.error(`É necessário o Node.js ${MINIMO} ou superior (mesmo o 22.11/22.12 é antigo; a versão LTS atual serve).`)
+  console.error('Baixe em https://nodejs.org, instale por cima e execute este arquivo de novo.')
+  console.error('Se acabou de instalar e esta mensagem continua, feche todas as janelas e abra de novo (ou reinicie o computador):')
+  console.error('o Windows ainda pode estar usando o Node antigo — no Prompt de Comando, "where node" mostra qual está em uso.')
   process.exit(1)
 }
 
@@ -54,7 +60,10 @@ function npm(args, descricao) {
   }
   if (r.status !== 0) {
     console.error(`\nO comando "npm ${args.join(' ')}" falhou (código ${r.status}). Leia a mensagem acima.`)
-    if (args[0] === 'install') console.error('Dica: a instalação precisa de internet. Se a rede usa proxy, configure-o no npm (npm config set proxy ...).')
+    if (args[0] === 'install') {
+      console.error('Dica: a instalação precisa de internet. Se a rede usa proxy, configure-o no npm (npm config set proxy ...).')
+      console.error('Se o problema continuar, apague a pasta node_modules e execute de novo; mantenha a pasta do sistema fora do OneDrive.')
+    }
     process.exit(1)
   }
 }
@@ -87,7 +96,7 @@ function maisRecente(dir) {
 const lockInstalado = mtime(path.join(raiz, 'node_modules', '.package-lock.json'))
 const lockProjeto = mtime(path.join(raiz, 'package-lock.json')) || 0
 if (!fs.existsSync(path.join(raiz, 'node_modules')) || lockInstalado === null) {
-  npm(['install', '--no-audit', '--no-fund'], 'Instalando as dependências (só na primeira vez; pode levar alguns minutos)...')
+  npm(['install', '--no-audit', '--no-fund'], 'Instalando as dependências (só na primeira vez; pode levar alguns minutos, não feche a janela)...')
 } else if (lockInstalado < lockProjeto) {
   npm(['install', '--no-audit', '--no-fund'], 'Atualizando as dependências (o projeto foi atualizado)...')
 }
@@ -104,3 +113,11 @@ if (compiladoEm === 0) {
 }
 
 console.log(`\nPronto: Node.js ${process.version}, aplicação compilada.`)
+
+// 3. Início (opcional): mesmo comando do "npm start", chamando o Node atual diretamente
+if (iniciar) {
+  const env = { ...process.env }
+  if (navegador) env.IMPRESSO_OPEN_BROWSER = '1'
+  const r = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', path.join('dist', 'server', 'src', 'index.js')], { cwd: raiz, stdio: 'inherit', env })
+  process.exit(r.status ?? 1)
+}

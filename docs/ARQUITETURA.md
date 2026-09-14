@@ -37,7 +37,7 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
 | `shared/cost.ts` | Modelo de custo puro + presets de fitas Sigma DS + testes |
 | `server/src/lib/db.ts` | Interface `Db` assíncrona, adaptadores SQLite/Postgres/PGlite, migrações, helpers de configuração |
 | `server/src/lib/auth.ts` | Usuário único, hash de senha, sessões |
-| `server/src/index.ts` + `lib/startup.ts` | Inicialização: versão mínima do Node (22.13), escuta em 127.0.0.1 e ::1 (ou no `HOST` informado), mensagens claras para porta ocupada, abertura do navegador (`IMPRESSO_OPEN_BROWSER=1`) |
+| `server/src/index.ts` + `lib/startup.ts` | Inicialização: versão mínima do Node (22.13), validação de `PORT`, escuta em 127.0.0.1 e ::1 (ou no `HOST` informado), porta ocupada sem `PORT` fixa → detecta um Impress-o já aberto ou tenta as portas seguintes, dicas em português para falhas (banco na nuvem, pasta sem permissão), abertura do navegador (`IMPRESSO_OPEN_BROWSER=1`) |
 | `scripts/preparar.mjs` | Usado por `iniciar.bat`/`iniciar.sh`: confere o Node, roda `npm install` e `npm run build` só quando necessário (dependências ou código mudaram) |
 | `server/src/lib/assets.ts` | Upload de imagens (data URL → arquivo), dimensões PNG/JPEG/WebP/GIF |
 | `server/src/routes/*` | `companies`, `departments`, `persons` (+ importação CSV), `templates` (+ import/export/duplicar/resolver), `cards` (dados de preenchimento), `printers`, `print` (jobs, PDF, cartão de teste), `cost`, `settings`, `auth` |

@@ -3,6 +3,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { interpretarPorta } from './startup.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 // Em desenvolvimento: <repo>/server/src/lib -> raiz = ../../..
@@ -48,6 +49,8 @@ export function lanAddresses(): string[] {
   return out
 }
 
+const porta = interpretarPorta(process.env.PORT)
+
 export const config = {
   repoRoot,
   dataDir,
@@ -59,8 +62,12 @@ export const config = {
   uploadsDir: path.join(dataDir, 'uploads'),
   printOutputDir: path.join(dataDir, 'print-output'),
   clientDist: path.join(repoRoot, 'dist', 'client'),
-  port: Number(process.env.PORT ?? 3070),
-  host: process.env.HOST ?? '127.0.0.1',
+  port: porta.port,
+  /** true quando PORT foi definida (válida) pelo usuário: sem tentar outras portas automaticamente. */
+  portDefinida: porta.origem === 'env',
+  /** Valor de PORT rejeitado (não numérico ou fora de 1..65535), para avisar; null quando OK. */
+  portInvalida: porta.origem === 'invalida' ? String(process.env.PORT) : null,
+  host: process.env.HOST?.trim() || '127.0.0.1',
   /** Valor de HOST informado pelo usuário (vazio = padrão: só este computador, em IPv4 e IPv6). */
   hostDefinido: process.env.HOST?.trim() || undefined,
   /** Abre o navegador padrão assim que o servidor estiver pronto (usado por iniciar.bat / iniciar.sh). */
