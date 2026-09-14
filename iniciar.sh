@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Inicia o Impress-o (Linux/macOS): instala dependências e compila na primeira vez.
+# Inicia o Impress-o (Linux/macOS): confere o Node, instala dependências e compila quando necessário.
 set -e
 cd "$(dirname "$0")"
 if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js não encontrado. Instale a versão 22 LTS ou superior (https://nodejs.org)."
+  echo "Node.js não encontrado. Instale a versão LTS (https://nodejs.org) e execute de novo."
   exit 1
 fi
-[ -d node_modules ] || npm install
-[ -f dist/client/index.html ] || npm run build
-URL="http://localhost:${PORT:-3070}"
-echo "Iniciando o Impress-o em $URL ..."
-( sleep 2; (command -v xdg-open >/dev/null && xdg-open "$URL") || (command -v open >/dev/null && open "$URL") ) >/dev/null 2>&1 &
+node scripts/preparar.mjs
+export IMPRESSO_OPEN_BROWSER=1
+echo
+echo "Iniciando o Impress-o... o navegador abre sozinho em http://localhost:${PORT:-3070} quando estiver pronto."
+echo "Mantenha esta janela aberta enquanto usar o sistema. Para encerrar, pressione Ctrl+C."
+echo
 npm start

@@ -61,6 +61,10 @@ export const config = {
   clientDist: path.join(repoRoot, 'dist', 'client'),
   port: Number(process.env.PORT ?? 3070),
   host: process.env.HOST ?? '127.0.0.1',
+  /** Valor de HOST informado pelo usuário (vazio = padrão: só este computador, em IPv4 e IPv6). */
+  hostDefinido: process.env.HOST?.trim() || undefined,
+  /** Abre o navegador padrão assim que o servidor estiver pronto (usado por iniciar.bat / iniciar.sh). */
+  abrirNavegador: process.env.IMPRESSO_OPEN_BROWSER === '1',
   /** true quando o servidor aceita conexões da rede local (HOST=0.0.0.0), para acesso pelo celular. */
   get lanEnabled(): boolean {
     return this.host === '0.0.0.0' || this.host === '::'

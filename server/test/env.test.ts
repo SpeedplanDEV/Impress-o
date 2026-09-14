@@ -32,7 +32,7 @@ describe('.env', () => {
     try {
       const deadline = Date.now() + 40000
       while (Date.now() < deadline && !/rodando em/.test(out)) await new Promise((r) => setTimeout(r, 200))
-      expect(out).toContain(`http://127.0.0.1:${port}`)
+      expect(out).toContain(`http://localhost:${port}`)
       expect(out).toContain(path.join(dir, 'dados'))
     } finally {
       child.kill()

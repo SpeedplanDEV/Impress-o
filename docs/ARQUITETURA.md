@@ -37,6 +37,8 @@ Navegador (React + Fabric.js)          Servidor local (Node 22 + Express)       
 | `shared/cost.ts` | Modelo de custo puro + presets de fitas Sigma DS + testes |
 | `server/src/lib/db.ts` | Interface `Db` assíncrona, adaptadores SQLite/Postgres/PGlite, migrações, helpers de configuração |
 | `server/src/lib/auth.ts` | Usuário único, hash de senha, sessões |
+| `server/src/index.ts` + `lib/startup.ts` | Inicialização: versão mínima do Node (22.13), escuta em 127.0.0.1 e ::1 (ou no `HOST` informado), mensagens claras para porta ocupada, abertura do navegador (`IMPRESSO_OPEN_BROWSER=1`) |
+| `scripts/preparar.mjs` | Usado por `iniciar.bat`/`iniciar.sh`: confere o Node, roda `npm install` e `npm run build` só quando necessário (dependências ou código mudaram) |
 | `server/src/lib/assets.ts` | Upload de imagens (data URL → arquivo), dimensões PNG/JPEG/WebP/GIF |
 | `server/src/routes/*` | `companies`, `departments`, `persons` (+ importação CSV), `templates` (+ import/export/duplicar/resolver), `cards` (dados de preenchimento), `printers`, `print` (jobs, PDF, cartão de teste), `cost`, `settings`, `auth` |
 | `server/src/printer/*` | `types.ts` (interface `PrinterAdapter`), `system.ts` (driver do SO: PowerShell no Windows, `lp` no CUPS; sondagem do driver; checagem de rede), `mock.ts` (grava PNG), `discovery.ts` (lista impressoras do SO) |

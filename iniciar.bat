@@ -5,24 +5,28 @@ cd /d "%~dp0"
 
 where node >nul 2>nul
 if errorlevel 1 (
-  echo Node.js nao encontrado. Instale a versao 22 LTS ou superior em https://nodejs.org e execute novamente.
+  echo.
+  echo Node.js nao encontrado neste computador.
+  echo Instale a versao LTS em https://nodejs.org e execute este arquivo de novo.
+  echo.
   pause
   exit /b 1
 )
 
-if not exist node_modules (
-  echo Instalando dependencias pela primeira vez...
-  call npm install
-  if errorlevel 1 ( echo Falha ao instalar dependencias. & pause & exit /b 1 )
+node scripts\preparar.mjs
+if errorlevel 1 (
+  echo.
+  echo Nao foi possivel preparar o Impress-o. Leia a mensagem acima.
+  pause
+  exit /b 1
 )
 
-if not exist dist\client\index.html (
-  echo Compilando a aplicacao...
-  call npm run build
-  if errorlevel 1 ( echo Falha ao compilar. & pause & exit /b 1 )
-)
-
-echo Iniciando o Impress-o em http://localhost:3070 ...
-start "" http://localhost:3070
+set IMPRESSO_OPEN_BROWSER=1
+echo.
+echo Iniciando o Impress-o... o navegador abre sozinho em http://localhost:3070 quando estiver pronto.
+echo Mantenha esta janela aberta enquanto usar o sistema. Para encerrar, feche esta janela.
+echo.
 call npm start
+echo.
+echo O Impress-o parou. Se apareceu uma mensagem de erro acima, anote-a ou tire uma foto da tela.
 pause

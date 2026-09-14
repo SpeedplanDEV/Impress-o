@@ -32,10 +32,24 @@ foto 3x4, nome, logo e layout totalmente personalizável, integrado à impressor
 
 ## Instalação e uso
 
-**Windows:** dê dois cliques em `iniciar.bat` (instala as dependências e compila na primeira vez, depois
-abre o navegador em <http://localhost:3070>). **Linux/macOS:** `./iniciar.sh`.
+O Impress-o roda **no computador ligado à impressora** (ou em qualquer PC, para cadastrar e testar).
+O endereço <http://localhost:3070> só abre nesse computador, enquanto a janela do sistema estiver
+aberta. Publicar o código no GitHub **não** coloca o sistema no ar; para acesso pela internet, veja
+[Publicar na internet](#publicar-na-internet-opcional).
 
-Ou manualmente:
+**Windows, passo a passo:**
+
+1. Instale o **Node.js LTS** em <https://nodejs.org> (versão 22.13 ou mais nova; a LTS atual serve).
+   Aceite as opções padrão do instalador.
+2. Baixe o sistema: no GitHub, **Code → Download ZIP**, e extraia a pasta em um lugar fixo
+   (por exemplo `C:\Impress-o`, fora de pastas sincronizadas como OneDrive). Ou `git clone`.
+3. Dê dois cliques em **`iniciar.bat`**. Na primeira vez ele instala as dependências e compila
+   (alguns minutos, precisa de internet). Depois abre o navegador sozinho em
+   <http://localhost:3070>. Mantenha a janela preta aberta enquanto usar o sistema.
+4. Na primeira vez, defina seu nome e senha. Depois, na tela **Impressão**, clique em
+   **Conectar impressora**.
+
+**Linux/macOS:** `./iniciar.sh`. Ou manualmente, em qualquer sistema:
 
 ```bash
 npm install
@@ -43,16 +57,33 @@ npm run build
 npm start
 ```
 
-Abra <http://localhost:3070>. Na primeira vez, defina seu nome e senha. Para desenvolvimento:
-`npm run dev` (servidor em 3070 + Vite em <http://localhost:5173>).
+Para desenvolvimento: `npm run dev` (servidor em 3070 + Vite em <http://localhost:5173>).
 
-Testes: `npm test` (modelo de custo, CSV, validação de modelo, PNG/PDF e API). Verificação de tipos:
-`npm run typecheck`. Teste ponta a ponta em navegador real: veja `e2e/README.md`.
+Testes: `npm test` (modelo de custo, CSV, validação de modelo, PNG/PDF, inicialização e API).
+Verificação de tipos: `npm run typecheck`. Teste ponta a ponta em navegador real: veja `e2e/README.md`.
+
+### Não abre em http://localhost:3070?
+
+Olhe a janela preta do `iniciar.bat` (ou o terminal): a causa aparece lá.
+
+| O que aparece | O que fazer |
+|---|---|
+| "Node.js nao encontrado" | Instale o Node.js LTS (<https://nodejs.org>) e execute `iniciar.bat` de novo. |
+| "A versão do Node.js instalada (...) é antiga demais" ou "No such built-in module: node:sqlite" | Instale o Node.js LTS por cima da versão antiga (precisa ser 22.13 ou mais nova). |
+| "A porta 3070 já está em uso" | O Impress-o já está aberto em outra janela: use essa janela, ou feche-a e inicie de novo. |
+| "npm install" falhou / sem internet | A primeira execução baixa as dependências; conecte à internet (ou configure o proxy da rede no npm) e tente de novo. |
+| A janela fecha sozinha na hora | Abra o **Prompt de Comando** na pasta do sistema e digite `iniciar.bat` para ler a mensagem. |
+| "Impress-o rodando em http://localhost:3070", mas o navegador diz que não conseguiu acessar | Recarregue a página (F5) ou digite o endereço manualmente. Confira se está no mesmo computador em que o sistema foi iniciado. |
+| Quer abrir de outro computador ou do celular | Veja [Uso no celular ou tablet](#uso-no-celular-ou-tablet) (`HOST=0.0.0.0`) ou publique na internet. |
+
+Ao atualizar o sistema (novo ZIP ou `git pull`), execute `iniciar.bat` de novo: ele recompila
+sozinho quando o código mudou.
 
 Variáveis opcionais (arquivo `.env`, veja `.env.example`): `PORT` (padrão 3070), `HOST` (padrão
-127.0.0.1), `DATABASE_URL` (Postgres na nuvem; vazio = SQLite local), `IMPRESSO_DATA_DIR` (pasta de
-dados; padrão `./data`), `IMPRESSO_DB_PATH` (arquivo do SQLite), `IMPRESSO_ALLOWED_HOSTS` (hosts
-extras aceitos, separados por vírgula) e `IMPRESSO_SECURE_COOKIES=1` (atrás de HTTPS).
+127.0.0.1 e ::1, só este computador), `DATABASE_URL` (Postgres na nuvem; vazio = SQLite local),
+`IMPRESSO_DATA_DIR` (pasta de dados; padrão `./data`), `IMPRESSO_DB_PATH` (arquivo do SQLite),
+`IMPRESSO_ALLOWED_HOSTS` (hosts extras aceitos, separados por vírgula), `IMPRESSO_SECURE_COOKIES=1`
+(atrás de HTTPS) e `IMPRESSO_OPEN_BROWSER=1` (abre o navegador quando o servidor estiver pronto).
 
 ## Banco de dados: local ou gratuito na nuvem
 
@@ -104,8 +135,9 @@ modelos e envio para impressão).
 
 ## Publicar na internet (opcional)
 
-O sistema pode ser hospedado para acesso de qualquer lugar (cadastros, modelos, histórico), usando o
-banco do Supabase/Neon. **A impressão continua só no computador ligado à Sigma DS**: rode o
+Colocar o código no GitHub guarda e distribui o sistema, mas não o deixa no ar: alguém precisa
+hospedá-lo. O sistema pode ser hospedado para acesso de qualquer lugar (cadastros, modelos,
+histórico), usando o banco do Supabase/Neon. **A impressão continua só no computador ligado à Sigma DS**: rode o
 Impress-o também nesse PC, apontando para o mesmo `DATABASE_URL`, e imprima por ele. O servidor na
 nuvem e o PC compartilham pessoas, empresas, modelos e histórico; cada um tem suas impressoras.
 
@@ -198,6 +230,7 @@ campos extras da pessoa.
 server/   API Express (TypeScript) — SQLite (node:sqlite), autenticação, cadastros, impressão, custo
 client/   Interface React + Vite — editor Fabric.js, telas em pt-BR
 shared/   Tipos e regras compartilhadas — CR80, formato do modelo, modelo de custo (com testes)
+scripts/  preparar.mjs — confere o Node, instala e compila quando necessário (usado por iniciar.bat/.sh)
 data/     Banco, fotos/logos e saída de impressão (criada em tempo de execução; fora do git)
 ```
 
