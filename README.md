@@ -102,6 +102,25 @@ o endereço e um QR code aparecem em **Configurações → Acesso pelo celular**
 impressora continua sendo a do computador que roda o sistema; o celular usa só a tela (cadastros,
 modelos e envio para impressão).
 
+## Publicar na internet (opcional)
+
+O sistema pode ser hospedado para acesso de qualquer lugar (cadastros, modelos, histórico), usando o
+banco do Supabase/Neon. **A impressão continua só no computador ligado à Sigma DS**: rode o
+Impress-o também nesse PC, apontando para o mesmo `DATABASE_URL`, e imprima por ele. O servidor na
+nuvem e o PC compartilham pessoas, empresas, modelos e histórico; cada um tem suas impressoras.
+
+Render (plano gratuito, com Docker):
+
+1. Crie uma conta em <https://render.com> e escolha **New → Blueprint**, apontando para este
+   repositório (o arquivo `render.yaml` já descreve o serviço).
+2. Informe a variável `DATABASE_URL` (connection string do Supabase, modo *Session pooler*).
+3. Ao terminar o deploy, abra a URL gerada (`https://impress-o-xxxx.onrender.com`), defina a senha e use.
+
+Qualquer outro provedor com Docker funciona com o `Dockerfile` da raiz: defina `DATABASE_URL`,
+`IMPRESSO_SECURE_COOKIES=1` e `IMPRESSO_PUBLIC_URL=https://seu-dominio` (para o sistema aceitar o
+domínio público). Sem `DATABASE_URL` o contêiner usa um SQLite em `/data` (monte um volume para
+persistir).
+
 ## Fluxo recomendado
 
 1. **Configurações → Impressoras**: adicione a *Entrust Sigma DS* escolhendo a fila do sistema

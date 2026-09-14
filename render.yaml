@@ -1,0 +1,15 @@
+# Blueprint do Render (https://render.com): crie um "Blueprint" apontando para este repositório.
+# Plano gratuito: o serviço dorme após inatividade e acorda no primeiro acesso (alguns segundos).
+services:
+  - type: web
+    name: impress-o
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/auth/status
+    envVars:
+      - key: DATABASE_URL        # cole a connection string do Supabase/Neon (Session pooler)
+        sync: false
+      - key: IMPRESSO_SECURE_COOKIES
+        value: "1"
+      - key: IMPRESSO_INSTANCE_ID
+        value: nuvem

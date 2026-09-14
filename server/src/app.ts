@@ -18,6 +18,13 @@ function allowedHostnames(): Set<string> {
     set.add(`${os.hostname().toLowerCase()}.local`)
   }
   for (const h of (process.env.IMPRESSO_ALLOWED_HOSTS ?? '').split(',').map((x) => x.trim()).filter(Boolean)) set.add(h.toLowerCase())
+  // Hospedagem: o domínio público informado pelo provedor (Render) ou pela URL configurada
+  if (process.env.RENDER_EXTERNAL_HOSTNAME) set.add(process.env.RENDER_EXTERNAL_HOSTNAME.toLowerCase())
+  const publicUrl = process.env.IMPRESSO_PUBLIC_URL?.trim()
+  if (publicUrl) {
+    const h = hostnameOf(publicUrl)
+    if (h) set.add(h)
+  }
   return set
 }
 
