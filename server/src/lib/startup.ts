@@ -78,10 +78,56 @@ export function descreverErroDeEscuta(err: NodeJS.ErrnoException, host: string, 
   }
 }
 
+/** Código de saída quando outra cópia já está aberta (iniciar.bat mostra uma mensagem própria). */
+export const SAIDA_JA_ABERTO = 42
+/** Código dos erros de escuta (porta), para não misturar com dicas de banco de dados. */
+export const ERR_ESCUTA = 'ERR_IMPRESSO_LISTEN'
+
+/** Endereço conectável para sondar "já está rodando": curingas e nomes viram 127.0.0.1; IPv6 ganha colchetes. */
+export function enderecoDeSonda(host: string | undefined): string {
+  const h = (host ?? '').trim().toLowerCase()
+  if (!h || h === '0.0.0.0' || h === '::' || h === '::1' || h === 'localhost') return '127.0.0.1'
+  return h.includes(':') ? `[${h}]` : h
+}
+
+/**
+ * Portas a tentar quando a padrão está ocupada ou reservada (sem PORT fixa):
+ * as quatro seguintes e depois um bloco distante (8070+), porque o Hyper-V/WSL
+ * reserva faixas de ~100 portas contíguas.
+ */
+export function portasCandidatas(inicial: number): number[] {
+  const seq = [0, 1, 2, 3, 4].map((i) => inicial + i)
+  const alternativa = inicial >= 8000 && inicial <= 8099 ? 3070 : 8070
+  for (let i = 0; i < 5; i++) seq.push(alternativa + i)
+  return seq.filter((p, i, a) => p >= 1 && p <= 65535 && a.indexOf(p) === i)
+}
+
+/** Erro de escuta com código próprio (ERR_ESCUTA), preservando o código original em `causa`. */
+export function erroDeEscuta(err: NodeJS.ErrnoException, host: string, port: number): Error & { code: string; causa?: string } {
+  return Object.assign(new Error(descreverErroDeEscuta(err, host, port)), { code: ERR_ESCUTA, causa: err.code })
+}
+
+/** Mensagem quando todas as portas candidatas falharam. */
+export function mensagemSemPortaLivre(tentadas: number[], ultimoCodigo: string | undefined): string {
+  const lista = `${tentadas[0]}–${tentadas[4] ?? tentadas[tentadas.length - 1]} e ${tentadas[5] ?? ''}–${tentadas[tentadas.length - 1]}`
+  const motivo = ultimoCodigo === 'EACCES' ? 'estão reservadas pelo Windows (Hyper-V/WSL; veja "netsh interface ipv4 show excludedportrange protocol=tcp")' : 'estão ocupadas por outros programas'
+  return `Nenhuma porta livre: as portas ${lista} ${motivo}. Defina outra porta no arquivo .env (por exemplo PORT=9090) e inicie de novo.`
+}
+
+/** Extrai a URI do banco de um valor colado com texto em volta (psql "...", aspas, espaços). */
+export function extrairDatabaseUrl(valor: string | undefined): { url: string | null; original: string | null; ignorada: boolean } {
+  const v = (valor ?? '').trim()
+  if (!v) return { url: null, original: null, ignorada: false }
+  if (/^pglite:\/\//i.test(v)) return { url: v, original: null, ignorada: false }
+  const m = /postgres(ql)?:\/\/[^\s"']+/i.exec(v)
+  if (!m) return { url: null, original: v, ignorada: true }
+  return { url: m[0], original: m[0] === v ? null : v, ignorada: false }
+}
+
 /** true se já existe um Impress-o respondendo nessa porta (para não abrir uma segunda cópia). */
 export async function impressoJaRodando(port: number, host = '127.0.0.1'): Promise<boolean> {
   try {
-    const r = await fetch(`http://${host}:${port}/api/auth/status`, { signal: AbortSignal.timeout(2000) })
+    const r = await fetch(`http://${enderecoDeSonda(host)}:${port}/api/auth/status`, { signal: AbortSignal.timeout(2000) })
     if (!r.ok) return false
     const j = (await r.json()) as { setupDone?: unknown }
     return typeof j.setupDone === 'boolean'
@@ -115,18 +161,26 @@ function hostEPortaDoBanco(url: string | null): { hostname: string; port: string
 
 /** Dicas em português para as falhas de inicialização mais comuns (além da mensagem original). */
 export function explicarFalhaDeInicio(err: unknown, ctx: ContextoDeFalha): string[] {
-  const e = err as NodeJS.ErrnoException & { code?: string }
+  const e = err as NodeJS.ErrnoException & { code?: string; syscall?: string }
   const code = e?.code ?? ''
+  const syscall = e?.syscall ?? ''
   const msg = e instanceof Error ? e.message : String(err)
   const dicas: string[] = []
   const banco = hostEPortaDoBanco(ctx.databaseUrl)
 
+  // Erros de porta já vêm explicados por descreverErroDeEscuta: nada de dicas de banco aqui
+  if (code === ERR_ESCUTA) return dicas
   if (code === 'ERR_UNKNOWN_BUILTIN_MODULE' || /node:sqlite/.test(msg)) {
     dicas.push(mensagemNodeAntigo())
     return dicas
   }
-  if (['EPERM', 'EACCES', 'EROFS'].includes(code) || /SQLITE_CANTOPEN|unable to open database|readonly database/i.test(msg)) {
+  const erroDeArquivo = ['EPERM', 'EACCES', 'EROFS'].includes(code) && syscall !== 'connect'
+  if (erroDeArquivo || /SQLITE_CANTOPEN|unable to open database|readonly database/i.test(msg)) {
     dicas.push(`Sem permissão para gravar na pasta de dados (${ctx.dataDir}). Mova a pasta do Impress-o para um lugar simples, como C:\\Impress-o (fora de "Arquivos de Programas", de pastas de rede e do OneDrive), ou defina IMPRESSO_DATA_DIR=C:\\Impress-o-dados no arquivo .env.`)
+    return dicas
+  }
+  if (!ctx.databaseUrl && (code === 'ERR_SQLITE_ERROR' || /not a database|database is locked|disk I\/O error|malformed/i.test(msg))) {
+    dicas.push(`O arquivo do banco local (em ${ctx.dataDir}) está corrompido ou bloqueado por outro programa (OneDrive, antivírus, outra janela do Impress-o). Feche outras janelas do Impress-o, pause a sincronização da pasta ou restaure o backup de data/; para começar do zero, defina IMPRESSO_DATA_DIR=C:\\Impress-o-dados no .env.`)
     return dicas
   }
   if (ctx.databaseUrl) {
@@ -138,14 +192,24 @@ export function explicarFalhaDeInicio(err: unknown, ctx: ContextoDeFalha): strin
       dicas.push('O banco recusou a senha da DATABASE_URL. Confira a senha (Project Settings → Database → Reset password no Supabase) e se "[YOUR-PASSWORD]" foi substituído.')
       return dicas
     }
-    if (['ENETUNREACH', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN'].includes(code) || /timeout|connection terminated|getaddrinfo/i.test(msg)) {
+    if (/tenant or user not found/i.test(msg)) {
+      dicas.push('O Supabase não reconheceu o usuário da DATABASE_URL. No modo "Session pooler" o usuário é postgres.<referência-do-projeto> (copie a connection string inteira de Connect); se o projeto gratuito foi pausado por inatividade, clique em "Restore project" no painel.')
+      return dicas
+    }
+    if (['SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID'].includes(code) || /self.signed|certificate/i.test(msg)) {
+      dicas.push('O certificado do banco não pôde ser validado. Remova IMPRESSO_DB_SSL=verify do .env (o Supabase e o Neon usam certificados próprios); a conexão continua cifrada.')
+      return dicas
+    }
+    const rede = ['ENETUNREACH', 'EHOSTUNREACH', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'EAI_AGAIN'].includes(code) || (code === 'EACCES' && syscall === 'connect')
+    if (rede || /timeout|connection terminated|getaddrinfo/i.test(msg)) {
       dicas.push(`Não foi possível alcançar o banco na nuvem${code ? ` (${code})` : ''}. Confira a internet e a DATABASE_URL, ou apague a linha DATABASE_URL do .env para usar o banco local (SQLite).`)
+      if (code === 'EACCES') dicas.push('"EACCES" ao conectar costuma ser o firewall ou o antivírus bloqueando a saída do Node.js: libere o node.exe ou a porta do banco (5432).')
       if (banco && /^db\.[a-z0-9]+\.supabase\.co$/.test(banco.hostname)) {
         dicas.push('Esse endereço do Supabase ("Direct connection") só funciona com IPv6, que a maioria das redes não tem. Em Connect, escolha o modo "Session pooler" (endereço ...pooler.supabase.com, porta 5432) e use essa connection string.')
       }
       return dicas
     }
-    if (banco?.port === '6543') {
+    if (banco?.port === '6543' && /relation|schema|search_path|does not exist|pooler|prepared statement|postgres/i.test(msg)) {
       dicas.push('A DATABASE_URL usa o "Transaction pooler" (porta 6543), que não mantém a configuração de esquema entre consultas. No Supabase, use o modo "Session pooler" (porta 5432).')
     }
   }
@@ -153,12 +217,23 @@ export function explicarFalhaDeInicio(err: unknown, ctx: ContextoDeFalha): strin
 }
 
 /** Avisos de configuração que não impedem o início, mas explicam comportamentos estranhos. */
-export function avisosDeConfiguracao(opts: { portInvalida: string | null; secureCookies: boolean; hostDefinido: string | undefined; publicUrl: string | undefined }): string[] {
+export function avisosDeConfiguracao(opts: {
+  portInvalida: string | null
+  secureCookies: boolean
+  hostDefinido: string | undefined
+  publicUrl: string | undefined
+  databaseUrlOriginal?: string | null
+  databaseUrlIgnorada?: boolean
+}): string[] {
   const avisos: string[] = []
   if (opts.portInvalida !== null) avisos.push(`PORT="${opts.portInvalida}" no .env não é um número de porta válido; usando ${PORTA_PADRAO}.`)
-  const loopback = !opts.hostDefinido || ['127.0.0.1', 'localhost', '::1'].includes(opts.hostDefinido.toLowerCase())
-  if (opts.secureCookies && !opts.publicUrl && loopback) {
-    avisos.push('IMPRESSO_SECURE_COOKIES=1 está ativo sem HTTPS: o login não vai funcionar em http://localhost. Remova essa linha do .env neste computador (ela só serve para hospedagem com HTTPS).')
+  if (opts.secureCookies && !opts.publicUrl) {
+    avisos.push('IMPRESSO_SECURE_COOKIES=1 está ativo sem HTTPS (sem IMPRESSO_PUBLIC_URL): o login pelo celular ou pela rede (http://192.168...) não vai funcionar. Remova essa linha do .env neste computador; ela só serve para hospedagem com HTTPS.')
+  }
+  if (opts.databaseUrlIgnorada && opts.databaseUrlOriginal) {
+    avisos.push(`DATABASE_URL="${opts.databaseUrlOriginal.slice(0, 60)}${opts.databaseUrlOriginal.length > 60 ? '…' : ''}" não começa com postgresql:// e foi ignorada; cole só a URI (sem psql e sem aspas). Usando o banco local (SQLite).`)
+  } else if (opts.databaseUrlOriginal) {
+    avisos.push('DATABASE_URL tinha texto em volta da URI (por exemplo psql "..." ou aspas); usando só a parte postgresql://...')
   }
   return avisos
 }

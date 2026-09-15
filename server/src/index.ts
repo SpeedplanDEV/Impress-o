@@ -4,13 +4,16 @@ import { config } from './lib/config.js'
 import { describeDatabase, getDb, nowIso } from './lib/db.js'
 import { importarUploadsAntigos } from './lib/assets.js'
 import {
+  SAIDA_JA_ABERTO,
   abrirNavegador,
   avisosDeConfiguracao,
-  descreverErroDeEscuta,
   enderecosDeEscuta,
+  erroDeEscuta,
   explicarFalhaDeInicio,
   impressoJaRodando,
   mensagemNodeAntigo,
+  mensagemSemPortaLivre,
+  portasCandidatas,
   urlLocal,
   verificarPastaDeDados,
   versaoNodeSuficiente,
@@ -29,52 +32,79 @@ function escutar(app: express.Express, host: string, port: number): Promise<http
   })
 }
 
-/** Quantas portas seguintes tentar quando a padrão está ocupada/reservada (só sem PORT no .env). */
-const TENTATIVAS_DE_PORTA = 10
+/** Outra cópia do Impress-o já atende nesta porta: abre o navegador nela e encerra sem erro. */
+function jaAberto(port: number): void {
+  const url = urlLocal('127.0.0.1', port)
+  console.log(`O Impress-o já está aberto neste computador em ${url}. Abrindo o navegador nele.`)
+  console.log('Esta janela pode ser fechada; mantenha aberta a janela que já estava rodando o Impress-o.')
+  if (config.abrirNavegador) abrirNavegador(url)
+  process.exitCode = SAIDA_JA_ABERTO
+}
 
 async function main() {
   if (!versaoNodeSuficiente()) {
     console.error(mensagemNodeAntigo())
     process.exit(1)
   }
-  for (const aviso of avisosDeConfiguracao({ portInvalida: config.portInvalida, secureCookies: config.secureCookies, hostDefinido: config.hostDefinido, publicUrl: process.env.IMPRESSO_PUBLIC_URL || process.env.RENDER_EXTERNAL_HOSTNAME })) {
+  for (const aviso of avisosDeConfiguracao({
+    portInvalida: config.portInvalida,
+    secureCookies: config.secureCookies,
+    hostDefinido: config.hostDefinido,
+    publicUrl: process.env.IMPRESSO_PUBLIC_URL || process.env.RENDER_EXTERNAL_HOSTNAME,
+    databaseUrlOriginal: config.databaseUrlOriginal,
+    databaseUrlIgnorada: config.databaseUrlIgnorada,
+  })) {
     console.warn(`Aviso: ${aviso}`)
   }
-  verificarPastaDeDados(config.dataDir)
-  fs.mkdirSync(config.printOutputDir, { recursive: true })
+  const enderecos = enderecosDeEscuta(config.hostDefinido)
+  const principal = enderecos[0]
+  // Antes de tocar no banco: se outra cópia já atende na porta, não há o que iniciar
+  // (e os trabalhos de impressão dela não podem ser marcados como interrompidos).
+  if (await impressoJaRodando(config.port, principal.host)) return jaAberto(config.port)
+
+  try {
+    verificarPastaDeDados(config.dataDir)
+    fs.mkdirSync(config.printOutputDir, { recursive: true })
+  } catch (err) {
+    // Com banco na nuvem a pasta local só guarda arquivos de impressão: avisa e segue
+    if (!config.databaseUrl) throw err
+    console.warn(`Aviso: a pasta de dados (${config.dataDir}) não aceita gravação; a impressão pode falhar ao gravar arquivos. Defina IMPRESSO_DATA_DIR no .env se necessário.`)
+  }
   const info = describeDatabase()
   console.log(`Banco de dados: ${info.kind === 'postgres' ? `Postgres (${info.target})` : info.kind === 'pglite' ? 'Postgres em memória' : `SQLite (${info.target})`}`)
   if (info.kind === 'postgres') console.log('Conectando ao banco na nuvem... (pode levar alguns segundos; sem resposta em 15 s o início é cancelado)')
   const db = await getDb()
+  bancoPronto = true
   // Trabalhos interrompidos por um reinício do servidor não podem ficar "imprimindo" para sempre
   await db.run(`UPDATE print_jobs SET status = 'error', error = 'Interrompido: o servidor foi reiniciado durante a impressão.', finished_at = ? WHERE instance_id = ? AND status IN ('queued', 'printing')`, [nowIso(), config.instanceId])
   const importados = await importarUploadsAntigos()
   if (importados > 0) console.log(`${importados} arquivo(s) de data/uploads importado(s) para o banco.`)
 
   const app = createApp()
-  const enderecos = enderecosDeEscuta(config.hostDefinido)
-  const principal = enderecos[0]
-  let port = config.port
-  // Endereço principal: obrigatório. Sem PORT no .env, uma porta ocupada não impede o uso:
-  // se já é o Impress-o, abre o navegador nele; se é outro programa, tenta a porta seguinte.
-  for (let tentativa = 0; ; tentativa++) {
+  // Sem PORT fixa (e fora do modo de desenvolvimento), uma porta ocupada ou reservada não impede o uso:
+  // tenta as candidatas em ordem; se a ocupante for outro Impress-o, abre o navegador nela.
+  const candidatas = config.portDefinida || !config.compilado ? [config.port] : portasCandidatas(config.port)
+  let port: number | null = null
+  let ultimo: NodeJS.ErrnoException | null = null
+  for (const p of candidatas) {
     try {
-      await escutar(app, principal.host, port)
+      await escutar(app, principal.host, p)
+      port = p
       break
     } catch (err) {
       const e = err as NodeJS.ErrnoException
-      const ocupada = e.code === 'EADDRINUSE' || e.code === 'EACCES'
-      if (!ocupada || config.portDefinida || tentativa >= TENTATIVAS_DE_PORTA) throw new Error(descreverErroDeEscuta(e, principal.host, port))
-      if (await impressoJaRodando(port, principal.host)) {
-        const url = urlLocal(principal.host, port)
-        console.log(`O Impress-o já está aberto neste computador em ${url}. Use essa janela (não é preciso abrir outra).`)
-        if (config.abrirNavegador) abrirNavegador(url)
+      if (e.code !== 'EADDRINUSE' && e.code !== 'EACCES') throw erroDeEscuta(e, principal.host, p)
+      if (e.code === 'EADDRINUSE' && (await impressoJaRodando(p, principal.host))) {
         await db.close()
-        return
+        return jaAberto(p)
       }
-      console.warn(`A porta ${port} está ocupada ou reservada (${e.code}); tentando a porta ${port + 1}...`)
-      port += 1
+      ultimo = e
+      if (candidatas.length > 1) console.warn(`A porta ${p} está ocupada ou reservada (${e.code}); tentando outra...`)
     }
+  }
+  if (port === null) {
+    const e = ultimo as NodeJS.ErrnoException
+    throw candidatas.length > 1 ? Object.assign(new Error(mensagemSemPortaLivre(candidatas, e.code)), { code: 'ERR_IMPRESSO_LISTEN' }) : erroDeEscuta(e, principal.host, config.port)
   }
   config.port = port
   for (const { host } of enderecos.slice(1)) {
@@ -104,10 +134,12 @@ async function main() {
   }
 }
 
+let bancoPronto = false
+
 main().catch((err) => {
   const e = err as NodeJS.ErrnoException
-  console.error('Falha ao iniciar o Impress-o:', e instanceof Error ? e.message : err, e?.code ? `(${e.code})` : '')
+  console.error('Falha ao iniciar o Impress-o:', e instanceof Error ? e.message : err, e?.code && e.code !== 'ERR_IMPRESSO_LISTEN' ? `(${e.code})` : '')
   for (const dica of explicarFalhaDeInicio(err, { databaseUrl: config.databaseUrl, dataDir: config.dataDir })) console.error(dica)
-  if (config.databaseUrl) console.error('Verifique a variável DATABASE_URL (Supabase/Neon) e a conexão com a internet.')
+  if (config.databaseUrl && !bancoPronto) console.error('Verifique a variável DATABASE_URL (Supabase/Neon) e a conexão com a internet.')
   process.exit(1)
 })

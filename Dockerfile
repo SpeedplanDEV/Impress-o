@@ -17,6 +17,8 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# scripts/ permite "npm start" (prestart) em provedores que não usam o CMD abaixo
+COPY --from=build /app/scripts ./scripts
 RUN mkdir -p /data && chown -R node:node /data /app
 USER node
 EXPOSE 3070

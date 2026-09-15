@@ -3,7 +3,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { interpretarPorta } from './startup.js'
+import { extrairDatabaseUrl, interpretarPorta } from './startup.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 // Em desenvolvimento: <repo>/server/src/lib -> raiz = ../../..
@@ -50,14 +50,20 @@ export function lanAddresses(): string[] {
 }
 
 const porta = interpretarPorta(process.env.PORT)
+const bancoUrl = extrairDatabaseUrl(process.env.DATABASE_URL)
 
 export const config = {
   repoRoot,
+  /** true quando roda a partir de dist/ (produção); false em desenvolvimento (tsx). */
+  compilado: compiled,
   dataDir,
   instanceId: process.env.IMPRESSO_INSTANCE_ID?.trim() || loadInstanceId(),
   instanceName: os.hostname(),
   /** postgres://... (Supabase, Neon...) para usar um banco na nuvem; vazio = SQLite local. */
-  databaseUrl: process.env.DATABASE_URL?.trim() || null,
+  databaseUrl: bancoUrl.url,
+  /** Valor original de DATABASE_URL quando foi preciso limpar (psql "...") ou ignorar; null quando estava certo. */
+  databaseUrlOriginal: bancoUrl.original,
+  databaseUrlIgnorada: bancoUrl.ignorada,
   dbPath: process.env.IMPRESSO_DB_PATH ? path.resolve(process.env.IMPRESSO_DB_PATH) : path.join(dataDir, 'impress-o.sqlite'),
   uploadsDir: path.join(dataDir, 'uploads'),
   printOutputDir: path.join(dataDir, 'print-output'),

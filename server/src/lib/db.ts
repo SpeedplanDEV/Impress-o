@@ -440,13 +440,14 @@ async function openSqlite(file: string): Promise<Db> {
   let conn: import('node:sqlite').DatabaseSync
   try {
     conn = new DatabaseSync(file)
+    // busy_timeout primeiro: um arquivo bloqueado (OneDrive, outra cópia) espera em vez de falhar na hora
+    conn.exec('PRAGMA busy_timeout = 5000')
+    conn.exec('PRAGMA journal_mode = WAL')
+    conn.exec('PRAGMA foreign_keys = ON')
   } catch (err) {
     const e = err as NodeJS.ErrnoException
     throw Object.assign(new Error(`Não foi possível abrir o banco de dados local (${file}): ${e.message}`), { code: e.code ?? 'ERR_SQLITE_ERROR' })
   }
-  conn.exec('PRAGMA journal_mode = WAL')
-  conn.exec('PRAGMA foreign_keys = ON')
-  conn.exec('PRAGMA busy_timeout = 5000')
   return new SqliteDb(conn)
 }
 

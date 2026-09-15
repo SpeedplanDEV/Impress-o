@@ -64,6 +64,9 @@ function npm(args, descricao) {
       console.error('Dica: a instalação precisa de internet. Se a rede usa proxy, configure-o no npm (npm config set proxy ...).')
       console.error('Se o problema continuar, apague a pasta node_modules e execute de novo; mantenha a pasta do sistema fora do OneDrive.')
     }
+    if (args[0] === 'run' && args[1] === 'build') {
+      console.error('Dica: se apareceu "tsc" ou "vite" não reconhecido, apague a pasta node_modules e execute de novo; confira também se a variável NODE_ENV=production não está definida no Windows.')
+    }
     process.exit(1)
   }
 }
@@ -92,13 +95,18 @@ function maisRecente(dir) {
   return max
 }
 
+// Aviso proativo: pastas sincronizadas costumam bloquear arquivos durante npm install e o banco SQLite
+if (/[\\/]OneDrive[\\/]/i.test(raiz)) {
+  console.warn('Aviso: a pasta do Impress-o está dentro do OneDrive. Se a instalação ou o banco falharem, mova a pasta para C:\\Impress-o.')
+}
+
 // 1. Dependências
 const lockInstalado = mtime(path.join(raiz, 'node_modules', '.package-lock.json'))
 const lockProjeto = mtime(path.join(raiz, 'package-lock.json')) || 0
 if (!fs.existsSync(path.join(raiz, 'node_modules')) || lockInstalado === null) {
-  npm(['install', '--no-audit', '--no-fund'], 'Instalando as dependências (só na primeira vez; pode levar alguns minutos, não feche a janela)...')
+  npm(['install', '--no-audit', '--no-fund', '--include=dev'], 'Instalando as dependências (só na primeira vez; pode levar alguns minutos, não feche a janela)...')
 } else if (lockInstalado < lockProjeto) {
-  npm(['install', '--no-audit', '--no-fund'], 'Atualizando as dependências (o projeto foi atualizado)...')
+  npm(['install', '--no-audit', '--no-fund', '--include=dev'], 'Atualizando as dependências (o projeto foi atualizado)...')
 }
 
 // 2. Compilação

@@ -49,12 +49,13 @@ aberta. Publicar o código no GitHub **não** coloca o sistema no ar; para acess
 4. Na primeira vez, defina seu nome e senha. Depois, na tela **Impressão**, clique em
    **Conectar impressora**.
 
-**Linux/macOS:** `./iniciar.sh`. Ou manualmente, em qualquer sistema:
+**Linux/macOS:** `./iniciar.sh`. Ou manualmente, em qualquer sistema (requer Node.js 22.13 ou mais
+novo; no Windows prefira o `iniciar.bat`):
 
 ```bash
 npm install
 npm run build
-npm start
+npm start      # confere o Node e recompila sozinho se o código mudou
 ```
 
 Para desenvolvimento: `npm run dev` (servidor em 3070 + Vite em <http://localhost:5173>).
@@ -72,15 +73,15 @@ deve responder um texto com `setupDone`; se responder, o sistema está no ar e o
 |---|---|
 | Nada acontece ao dar dois cliques, ou "O Windows protegeu o computador" | Clique em **Mais informações → Executar assim mesmo**, ou botão direito em `iniciar.bat` → Propriedades → **Desbloquear**. No PowerShell, digite `.\iniciar.bat`. |
 | "Esta pasta esta incompleta" | O ZIP não foi extraído: botão direito → **Extrair tudo...** para uma pasta fixa (ex.: `C:\Impress-o`) e execute de lá. |
-| "Node.js nao encontrado" | Instale o Node.js LTS (<https://nodejs.org>) e execute `iniciar.bat` de novo. |
+| "Node.js nao encontrado" | Instale o Node.js LTS (<https://nodejs.org>) e execute `iniciar.bat` de novo. Se acabou de instalar, feche todas as janelas e execute de novo (ou reinicie o computador): o Windows ainda pode estar com o caminho antigo. |
 | "A versão do Node.js instalada (...) é antiga demais" | Instale o Node.js LTS por cima (precisa ser 22.13 ou mais nova; 22.11/22.12 não servem). Se continuar, feche tudo e abra de novo ou reinicie: `where node` mostra qual versão o Windows está usando. |
 | "npm install" falhou | A primeira execução baixa as dependências: conecte à internet (ou configure o proxy da rede no npm), apague a pasta `node_modules` e tente de novo. Mantenha a pasta fora do OneDrive. |
-| "O Impress-o já está aberto neste computador em ..." | Já existe uma janela do sistema rodando: use-a (o navegador é aberto nela). |
-| "A porta 3070 está ocupada ou reservada (...); tentando a porta 3071" | Normal: outro programa usa a 3070 e o sistema escolheu a próxima porta livre; o navegador abre no endereço certo. Com `PORT=` fixo no `.env`, troque para outra porta (o Hyper-V/WSL reserva faixas: `netsh interface ipv4 show excludedportrange protocol=tcp`). |
+| "O Impress-o já está aberto neste computador em ..." | Já existe uma janela do sistema rodando: o navegador é aberto nela e esta janela pode ser fechada. |
+| "A porta 3070 está ocupada ou reservada (...); tentando outra" | Normal: outro programa usa a 3070 e o sistema tenta as seguintes e depois 8070; o navegador abre no endereço certo. Com `PORT=` fixo no `.env`, troque para outra porta (o Hyper-V/WSL reserva faixas de ~100 portas: `netsh interface ipv4 show excludedportrange protocol=tcp`). |
 | "Sem permissão para gravar na pasta de dados" | Mova a pasta para `C:\Impress-o` (fora de Arquivos de Programas, pastas de rede e OneDrive) ou defina `IMPRESSO_DATA_DIR=C:\Impress-o-dados` no `.env`. |
 | "Não foi possível alcançar o banco na nuvem" | Confira a internet e a `DATABASE_URL`; no Supabase use o modo **Session pooler** (porta 5432, funciona em IPv4). Sem banco na nuvem, apague a linha `DATABASE_URL` para usar o SQLite local. |
 | "DATABASE_URL inválida" | A senha tem símbolos (`#`, `?`, `/`, `@`, `%`): codifique-os (`#` vira `%23`) ou troque por uma senha só com letras e números. |
-| "Impress-o rodando em http://localhost:3070", mas o navegador diz que não conseguiu acessar | Recarregue a página (F5) ou digite o endereço com `http://` na frente (não `https://`). Tente também `http://127.0.0.1:3070`. Confira se está no mesmo computador em que o sistema foi iniciado. |
+| "Impress-o rodando em http://localhost:3070", mas o navegador diz que não conseguiu acessar | Recarregue a página (F5) ou digite o endereço com `http://` na frente (não `https://`). Tente também `http://127.0.0.1:3070`. Confira se está no mesmo computador em que o sistema foi iniciado. Se o navegador insistir em `https://localhost`, apague a política em `chrome://net-internals/#hsts` (ou `edge://...`), em "Delete domain security policies", digitando `localhost`. |
 | A página diz "interface ainda não compilada" | Feche a janela e execute `iniciar.bat` (ou `npm run build`) de novo; o build anterior ficou incompleto. |
 | Quer abrir de outro computador ou do celular | Veja [Uso no celular ou tablet](#uso-no-celular-ou-tablet) (`HOST=0.0.0.0`) ou publique na internet. |
 

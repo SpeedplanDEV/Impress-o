@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
-import { abrirNavegador, avisosDeConfiguracao, descreverErroDeEscuta, enderecosDeEscuta, explicarFalhaDeInicio, impressoJaRodando, interpretarPorta, mensagemNodeAntigo, urlLocal, verificarPastaDeDados, versaoNodeSuficiente } from './startup.js'
+import { ERR_ESCUTA, abrirNavegador, avisosDeConfiguracao, descreverErroDeEscuta, enderecoDeSonda, enderecosDeEscuta, erroDeEscuta, explicarFalhaDeInicio, extrairDatabaseUrl, impressoJaRodando, interpretarPorta, mensagemNodeAntigo, mensagemSemPortaLivre, portasCandidatas, urlLocal, verificarPastaDeDados, versaoNodeSuficiente } from './startup.js'
 
 describe('versão mínima do Node', () => {
   it('aceita a versão mínima e superiores', () => {
@@ -173,5 +173,83 @@ describe('avisos de configuração', () => {
     fs.writeFileSync(arquivo, 'x')
     expect(() => verificarPastaDeDados(`${arquivo}/dados`)).toThrow()
     fs.rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('rodada 3: sonda, portas candidatas e DATABASE_URL colada', () => {
+  it('sonda sempre um endereço conectável', () => {
+    expect(enderecoDeSonda('0.0.0.0')).toBe('127.0.0.1')
+    expect(enderecoDeSonda('::')).toBe('127.0.0.1')
+    expect(enderecoDeSonda('::1')).toBe('127.0.0.1')
+    expect(enderecoDeSonda('localhost')).toBe('127.0.0.1')
+    expect(enderecoDeSonda(undefined)).toBe('127.0.0.1')
+    expect(enderecoDeSonda('192.168.0.10')).toBe('192.168.0.10')
+    expect(enderecoDeSonda('fd00::7')).toBe('[fd00::7]')
+  })
+  it('reconhece o Impress-o mesmo quando o HOST configurado é 0.0.0.0', async () => {
+    const http = await import('node:http')
+    const srv = http.createServer((_req, res) => res.end(JSON.stringify({ setupDone: false, authenticated: false, userName: null })))
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r))
+    try {
+      const port = (srv.address() as { port: number }).port
+      expect(await impressoJaRodando(port, '0.0.0.0')).toBe(true)
+      expect(await impressoJaRodando(port, '::')).toBe(true)
+    } finally {
+      srv.close()
+    }
+  })
+  it('portas candidatas: quatro seguintes e um bloco distante, sem repetição', () => {
+    expect(portasCandidatas(3070)).toEqual([3070, 3071, 3072, 3073, 3074, 8070, 8071, 8072, 8073, 8074])
+    expect(portasCandidatas(8070)).toEqual([8070, 8071, 8072, 8073, 8074, 3070, 3071, 3072, 3073, 3074])
+    expect(portasCandidatas(65533)).toEqual([65533, 65534, 65535, 8070, 8071, 8072, 8073, 8074])
+  })
+  it('mensagem sem porta livre distingue reserva do Windows de ocupação', () => {
+    expect(mensagemSemPortaLivre(portasCandidatas(3070), 'EACCES')).toContain('netsh')
+    expect(mensagemSemPortaLivre(portasCandidatas(3070), 'EADDRINUSE')).toContain('ocupadas')
+    expect(mensagemSemPortaLivre(portasCandidatas(3070), 'EADDRINUSE')).toContain('PORT=9090')
+  })
+  it('erro de escuta tem código próprio e não gera dicas de banco', () => {
+    const e = erroDeEscuta(Object.assign(new Error('x'), { code: 'EADDRINUSE' }), '127.0.0.1', 3070)
+    expect(e.code).toBe(ERR_ESCUTA)
+    expect(e.causa).toBe('EADDRINUSE')
+    expect(explicarFalhaDeInicio(e, { databaseUrl: 'postgresql://u:p@h:6543/db', dataDir: 'd' })).toEqual([])
+  })
+  it('extrai a URI colada com psql ou aspas e ignora valores sem postgresql://', () => {
+    expect(extrairDatabaseUrl('postgresql://u:p@h:5432/db')).toEqual({ url: 'postgresql://u:p@h:5432/db', original: null, ignorada: false })
+    expect(extrairDatabaseUrl('psql "postgresql://u:p@h:5432/db?sslmode=require"')).toEqual({ url: 'postgresql://u:p@h:5432/db?sslmode=require', original: 'psql "postgresql://u:p@h:5432/db?sslmode=require"', ignorada: false })
+    expect(extrairDatabaseUrl("'postgres://u:p@h/db'")).toMatchObject({ url: 'postgres://u:p@h/db', ignorada: false })
+    expect(extrairDatabaseUrl('https://abc.supabase.co')).toEqual({ url: null, original: 'https://abc.supabase.co', ignorada: true })
+    expect(extrairDatabaseUrl('  ')).toEqual({ url: null, original: null, ignorada: false })
+    expect(extrairDatabaseUrl('pglite://memory')).toEqual({ url: 'pglite://memory', original: null, ignorada: false })
+  })
+  it('avisa sobre DATABASE_URL ignorada ou limpa, e sobre cookie Secure com HOST=0.0.0.0', () => {
+    const base = { portInvalida: null, secureCookies: false, hostDefinido: undefined, publicUrl: undefined }
+    expect(avisosDeConfiguracao({ ...base, databaseUrlIgnorada: true, databaseUrlOriginal: 'https://abc.supabase.co' })[0]).toContain('ignorada')
+    expect(avisosDeConfiguracao({ ...base, databaseUrlIgnorada: false, databaseUrlOriginal: 'psql "postgresql://x"' })[0]).toContain('texto em volta')
+    expect(avisosDeConfiguracao({ ...base, secureCookies: true, hostDefinido: '0.0.0.0' })[0]).toContain('celular')
+  })
+})
+
+describe('rodada 3: dicas novas', () => {
+  const ctx = { databaseUrl: 'postgresql://u:p@aws-0-sa-east-1.pooler.supabase.com:5432/postgres', dataDir: 'd' }
+  it('EACCES ao conectar é rede/firewall, não pasta', () => {
+    const d = explicarFalhaDeInicio(Object.assign(new Error('connect EACCES 1.2.3.4:5432'), { code: 'EACCES', syscall: 'connect' }), ctx).join('\n')
+    expect(d).toContain('alcançar o banco')
+    expect(d).toContain('firewall')
+    expect(d).not.toContain('IMPRESSO_DATA_DIR')
+  })
+  it('certificado próprio e usuário do pooler', () => {
+    expect(explicarFalhaDeInicio(Object.assign(new Error('self-signed certificate in certificate chain'), { code: 'SELF_SIGNED_CERT_IN_CHAIN' }), ctx).join('\n')).toContain('IMPRESSO_DB_SSL')
+    expect(explicarFalhaDeInicio(new Error('Tenant or user not found'), ctx).join('\n')).toContain('Restore project')
+  })
+  it('SQLite corrompido ou bloqueado (só sem banco na nuvem)', () => {
+    const local = { databaseUrl: null, dataDir: 'C:\\Impress-o\\data' }
+    expect(explicarFalhaDeInicio(Object.assign(new Error('file is not a database'), { code: 'ERR_SQLITE_ERROR' }), local).join('\n')).toContain('corrompido ou bloqueado')
+    expect(explicarFalhaDeInicio(new Error('database is locked'), local).join('\n')).toContain('OneDrive')
+  })
+  it('dica do Transaction pooler só para erros que parecem do banco', () => {
+    const t = { ...ctx, databaseUrl: 'postgresql://u:p@h:6543/db' }
+    expect(explicarFalhaDeInicio(new Error('relation "impresso.settings" does not exist'), t).join('\n')).toContain('5432')
+    expect(explicarFalhaDeInicio(new Error('qualquer outra coisa'), t)).toEqual([])
   })
 })
