@@ -1,0 +1,14 @@
+{
+  "name": "SpeedPlan Gestão",
+  "short_name": "SpeedPlan",
+  "description": "Gestão interna SpeedPlan",
+  "lang": "pt-BR",
+  "start_url": "/leads",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#002AFF",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
